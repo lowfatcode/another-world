@@ -117,6 +117,10 @@ namespace another_world {
     for(auto resource : resources) {
       if(resource->state == Resource::State::NEEDS_LOADING) { 
 
+        if (resource->type == Resource::Type::SOUND || resource->type == Resource::Type::MUSIC) {
+          continue;
+        }
+
         uint8_t *destination;
         if(resource->type == Resource::Type::IMAGE) {
           destination = vram[0];
@@ -253,21 +257,38 @@ namespace another_world {
     return v;
   }
 
-  void VirtualMachine::point(uint8_t* target, uint8_t color, Point* point) {
-    if (point->x & 0b1) {
-      target[(point->y * 160) + (point->x / 2)] &= 0xf0;
-      target[(point->y * 160) + (point->x / 2)] |= color & 0x0f;
+  void VirtualMachine::point(uint8_t* target, uint8_t color, Point* p) {
+    uint32_t offset = (p->y * 160) + (p->x / 2);
+    uint8_t* pd = target + offset;
+    uint8_t mask = p->x & 0b1 ? 0x0f : 0xf0;
+
+    if (offset > (160 * 200)) {
+      assert(false);
     }
-    else {
-      target[(point->y * 160) + (point->x / 2)] &= 0x0f;
-      target[(point->y * 160) + (point->x / 2)] |= color & 0xf0;
+    if (color == 0x10) {
+      // special blend mode, set the high bit of the colour (to offset the drawn color
+      // palette index by 8. This is used to overlay colours (like the headlights of
+      // the car during the intro animation) and requires the palettes to be carefully
+      // setup to achieve the effect.
+      (*pd) |= 0x88 & mask;  // set the high bit in the masked nibble
+    } else if (color > 0x10) {
+      // special blend mode, copy data from the visible(TODO: confirm?) frame buffer            
+      (*pd) &= (~mask); // clear the nibble in the target
+      uint8_t* ps = get_vram_from_id(2) + offset; // get same offset in copy from buffer
+      (*pd) |= (*ps) & mask; // copy the nibble from visible vram
+    } else {
+      // draw in the colour requested
+      uint8_t c = color & 0x0f;
+      c = c | (c << 4);
+      (*pd) &= (~mask);  // clear the nibble in the target
+      (*pd) |= c & mask; // mask in the new colour
     }
   }
 
   void VirtualMachine::polygon(uint8_t *target, uint8_t color, Point *points, uint8_t point_count) {
     static int32_t nodes[256]; // maximum allowed number of nodes per scanline for polygon rendering    
 
-    Rect clip = { 0, 0, 320, 200 };
+    Rect clip = { 0, 0, 319, 199 };
     int16_t miny = points[0].y, maxy = points[0].y;
 
     // copy the colour value into the high and low nibbles making
@@ -311,42 +332,8 @@ namespace another_world {
       }
 
       for (uint16_t i = 0; i < n; i += 2) {
-        // TODO: make this faster
-        for (uint16_t x = nodes[i]; x < nodes[i + 1]; x++) {
-          if (color < 0b00010000) { 
-            // draw in the colour requested
-            if (x & 0b1) {
-              target[(p.y * 160) + (x / 2)] &= 0xf0;
-              target[(p.y * 160) + (x / 2)] |= c & 0x0f;
-            }
-            else {
-              target[(p.y * 160) + (x / 2)] &= 0x0f;
-              target[(p.y * 160) + (x / 2)] |= c & 0xf0;
-            }
-          }
-          else if (color > 0b00010000) {
-            // copy data from the visible(TODO: confirm?) frame buffer            
-            if (x & 0b1) {
-              target[(p.y * 160) + (x / 2)] &= 0xf0;
-              target[(p.y * 160) + (x / 2)] |= visible_vram[(p.y * 160) + (x / 2)] & 0x0f;
-            }
-            else {
-              target[(p.y * 160) + (x / 2)] &= 0x0f;
-              target[(p.y * 160) + (x / 2)] |= visible_vram[(p.y * 160) + (x / 2)] & 0xf0;
-            }
-          }
-          else {
-            // special blend mode, set the high bit of the colour (to offset the drawn color
-            // palette index by 8. This is used to overlay colours (like the headlights of
-            // the car during the intro animation) and requires the palettes to be carefully
-            // setup to achieve the effect.
-            if (x & 0b1) {
-              target[(p.y * 160) + (x / 2)] |= 0x08;
-            }
-            else {
-              target[(p.y * 160) + (x / 2)] |= 0x80;
-            }
-          }
+        for (p.x = nodes[i]; p.x < nodes[i + 1]; p.x++) {
+          point(target, color, &p);
         }
       }      
     }
@@ -368,8 +355,6 @@ namespace another_world {
     // 63 (11000000) which states "fin du bloc matrice" - i suspect originally
     // the plan was to mark the end of a polygon group this way but ultimately
     // he decided to include the count in the bytecode? not sure...
-    
-    debug_log("                shape");
 
     if ((shape_header & 0b11000000) == 0b11000000) {
       // draw a single polygon
@@ -386,10 +371,7 @@ namespace another_world {
       // why? we just don't know
       if ((shape_header & 0x3f) == 2) {
         draw_polygon_group(color, pos, zoom, buffer, offset);
-      }
-      else {
-        // ???
-        //assert(false);
+      } else {
       }
     }
 
@@ -410,8 +392,6 @@ namespace another_world {
     // load in the point data for this polygon and offset/scale accordingly
     int16_t point_count = fetch_byte(buffer, offset);
 
-    debug_log("                polygon %d points", point_count);
-
     for (uint8_t i = 0; i < point_count; i++) {
       points[i].x = bounds.x + fetch_byte(buffer, offset) * zoom / 64;
       points[i].y = bounds.y + fetch_byte(buffer, offset) * zoom / 64;
@@ -431,8 +411,6 @@ namespace another_world {
 
     int8_t count = fetch_byte(buffer, offset);
 
-    debug_log("                polygon group %d children", count);
-
     for (uint8_t i = 0; i < count; i++) {
       uint16_t header = fetch_word(buffer, offset);
 
@@ -445,15 +423,9 @@ namespace another_world {
       // or uses the colour we used previously.
       // if it is set then we need to pull the new colour from the bytecode
       if (header & 0x8000) {
-        color = fetch_byte(buffer, offset);
+        color = fetch_byte(buffer, offset) & 0x7f;
 
-        // if the high bit of the colour is set then we need to also fetch
-        // the mask number
-        if(color & 0x80) {
-          fetch_byte(buffer, offset);
-        }
-
-        color &= 0x7f; // discard high bit
+        fetch_byte(buffer, offset); // TODO: what is this?
       }
 
       uint32_t child_offset = (header & 0x7fff) * 2;
@@ -466,22 +438,30 @@ namespace another_world {
     // "set pour la couleur masque" which translates to "set for
     // the colour mask"? not sure what that means...
     //
-    //   0 - vram[2] background 
-    //   1 - vram[0] foreground buffer 1 
-    //   2 - vram[1] foreground buffer 2
-    //   3 - vram[2] background
+    //   0 - vram[2] background framebuffer (used for mask color - "sert pour la coleur masque")
+    //   1 - vram[0] foreground framebuffer 1 
+    //   2 - vram[1] foreground framebuffer 2
+    //   3 - vram[2] background framebuffer
     //
-    // 254 - currently visible foreground buffer
-    // 255 - currently invisible foreground buffer
-    if (id < 3) {
-      return vram[id == 0 ? 2 : id - 1];
+    // 254 - currently visible foreground framebuffer
+    // 255 - currently invisible foreground framebuffer
+    if (id == 0) {
+      // special case for masking?
+      return vram[2];
+    }
+    if (id >= 1 && id <= 3) {
+      // return the requested framebuffer
+      return vram[id - 1];
     }
 
     if (id == 254) {
+      // visible screen "ecran visible"
       return visible_vram;
+      
     }
 
     if (id == 255) {
+      // invisible screen "ecran invisible"
       return visible_vram == vram[0] ? vram[1] : vram[0];
     }
 
@@ -536,16 +516,12 @@ namespace another_world {
           } else if (opcode < 0x40) {
             // invalid
           } else if (opcode < 0x80) {
-            opcode_name = "plyfg";
+            opcode_name = "plyl";
           } else {
-            opcode_name = "plybg";
+            opcode_name = "plys";
           }
           
           debug_log("%2i [%05u] > %02x:%-6s", i, *(pc) - 1, opcode, opcode_name.c_str());
-
-          if ((opcode & 0x3f) == 0x3f) {
-            assert(false);
-          }
 
           // opcodes come in three different flavours depending on the status
           // of the two highest bits
@@ -576,8 +552,8 @@ namespace another_world {
             if (pos.y > 199) {
               pos.x += pos.y - 199;
               pos.y = 199;
-            }
-            
+            }                              
+
             draw_shape(0xff, pos, 64, polygon_data, &offset);
 
             continue;
@@ -591,7 +567,7 @@ namespace another_world {
             uint8_t* polygon_data = background->data;
 
             Point pos;
-
+            
             // bits 0-5 of the opcode have special meaning that manipulate the
             // x and y coordinates for this polygon.
             //
@@ -795,13 +771,13 @@ namespace another_world {
               // pal    #12, #12
               // specify the index of the palette to use
               uint8_t palette_id = fetch_byte(pc);
-
+    
               // TODO: from Eric Chahi's original notes the second byte of
               // this instruction appears to be a speed ("a la vitesse") 
               // for the palette change - but then parts of the notes are
               // crossed out suggesting it was never implemented?
               uint8_t speed = fetch_byte(pc);
-
+              
               // calculate the offset for the requested palette
               uint16_t offset = palette_id * 32;
               
@@ -845,27 +821,36 @@ namespace another_world {
               break;
             }
 
-
+            // framebuffer manipulation op codes
+            // 
             case 0x0d: {
               // setws    #12
               // set the working screen for drawing operations
               uint8_t id = fetch_byte(pc);
               uint8_t *b = get_vram_from_id(id);
 
+              debug("Set working buffer %d", id);
+
               if(b) {
                 // TODO: why would we ever be given an invalid screen id?
                 // that doesn't seem right...
+
                 working_vram = b;
-              }              
+              }
+              else {
+                assert(false);
+              }
               break;
             }
 
             case 0x0e: {
-              // clr    #12, #12
+              // vclr   #12, #12
               // clears an entire backbuffer with the specified palette
               // colour              
               uint8_t id = fetch_byte(pc);
               uint8_t* d = get_vram_from_id(id);              
+
+              debug("Clear buffer %d", id);
 
               uint8_t color = fetch_byte(pc);
               color |= color << 4;
@@ -875,6 +860,9 @@ namespace another_world {
                 // that doesn't seem right...
                 memset(d, color, 320 * 200 / 2);
               }
+
+              debug_yield();
+
               break;
             }
 
@@ -884,15 +872,18 @@ namespace another_world {
               uint8_t src_id = fetch_byte(pc);
               uint8_t dest_id = fetch_byte(pc);
 
+              debug("Copy buffer %d to %d", src_id, dest_id);
+              src_id &= ~0x40;
               uint8_t *s = get_vram_from_id(src_id);
               uint8_t *d = get_vram_from_id(dest_id);
-              
+
               if(s && d) {
                 // TODO: why would we ever be given an invalid screen id?
                 // that doesn't seem right...
                 memcpy(d, s, 320 * 200 / 2);
               }
               
+              debug_yield();
               // TODO: this should support vertical scrolling by looking the
               // value in register VM_VARIABLE_SCROLL_Y
               // e.g. video->copyPage(srcPageId, dstPageId, vmVariables[VM_VARIABLE_SCROLL_Y]);
@@ -904,17 +895,19 @@ namespace another_world {
               // copy specified backbuffer to screen
               uint8_t id = fetch_byte(pc);
 
-              if(id == 0xff) {
-                // from Eric Chahi's notes:
-                // "si n == 255 on flip invisi et visi" so in case the
-                // id specified is 255 we swap which of the backbuffers
-                // is the visible one
-                visible_vram = visible_vram == vram[0] ? vram[1] : vram[0];
-                
+              debug("Show buffer %d", id);
+
+              if(id == 0xff) {                              
                 // TODO: do we also need to update the screen? it's unclear
                 // but it seems like the thing you'd want to do right after
                 // swapping backbuffers
                 update_screen(visible_vram);
+
+                // from Eric Chahi's notes:
+                // "si n == 255 on flip invisi et visi" so in case the
+                // id specified is 255 we swap which of the backbuffers
+                // is the woring framebuffer
+                visible_vram = visible_vram == vram[0] ? vram[1] : vram[0];
               } else {
                 uint8_t* b = get_vram_from_id(id);
 
@@ -924,6 +917,8 @@ namespace another_world {
                   update_screen(b);
                 }
               }
+
+              debug_yield();
 
               break;
             }
@@ -950,7 +945,7 @@ namespace another_world {
               }
               else {
                 // TODO: why would we ever get an invalid string id?
-                assert(false);
+                //assert(false);
               }
 
               // TODO: make this work?

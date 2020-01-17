@@ -11,7 +11,7 @@
 
 namespace another_world {
 
-  #define HEAP_SIZE 600 * 1024
+  #define HEAP_SIZE 200 * 1024
   #define REGISTER_COUNT 256
   #define THREAD_COUNT 64
 
@@ -74,7 +74,7 @@ namespace another_world {
     Resource *background;
     Resource *characters;
 
-    uint8_t *working_vram = vram[2];
+    uint8_t *working_vram = vram[0];
 		uint8_t *visible_vram = vram[0];
 
     void init();

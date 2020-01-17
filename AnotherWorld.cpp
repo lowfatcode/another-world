@@ -149,38 +149,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       for (uint8_t i = 0; i < 16; i++) {
         uint16_t color = p[i];
 
-        uint8_t r = (color & 0b0000111100000000) >> 8;
-        uint8_t g = (color & 0b0000000011110000) >> 4;
-        uint8_t b = (color & 0b0000000000001111) >> 0;
-        palette[i][0] = (r << 4) | (r & 0b1111);
-        palette[i][1] = (g << 4) | (g & 0b1111);
-        palette[i][2] = (b << 4) | (b & 0b1111); 
-
-
-        /* TODO: i thought the palette was 16-bit for the MSDOS version?
-
-        uint8_t r = (color & 0b1111100000000000) >> 11;
-        uint8_t g = (color & 0b0000011111100000) >> 5;
-        uint8_t b = (color & 0b0000000000011111) >> 0;
-
-        palette[i][0] = (r << 3) | (r & 0b111);
-        palette[i][1] = (g << 2) | (g & 0b011);
-        palette[i][2] = (b << 3) | (b & 0b111);*/
+        uint8_t r = (color & 0b0000000000001111) >> 0;
+        uint8_t g = (color & 0b1111000000000000) >> 12;
+        uint8_t b = (color & 0b0000111100000000) >> 8;
+        palette[i][0] = (r << 4) | r;
+        palette[i][1] = (g << 4) | g;
+        palette[i][2] = (b << 4) | b; 
       }
     };
 
-    uint8_t v = 100;
-    uint8_t* pt = &v;
-    const uint8_t* pc = pt;
-
-    *pc++;
-
-
     another_world::debug_yield = []() {
-     /* InvalidateRect(hWnd, NULL, FALSE);
+      InvalidateRect(hWnd, NULL, FALSE);
       UpdateWindow(hWnd);
 
-      Sleep(10);*/
+      Sleep(10);
     };
 
     load_resource_list();
@@ -212,8 +194,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       // aim for 25 frames per second
       if(clock - last_frame_clock > 20) {
         uint32_t frame_start = now();
+        debug("-------------------------------");
         vm.execute_threads();
-        debug("Frame took %dms", now() - frame_start);
+        //debug("Frame took %dms", now() - frame_start);
         last_frame_clock = clock;
         InvalidateRect(hWnd, NULL, FALSE);
       }      
@@ -266,7 +249,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    hInst = hInstance; // Store instance handle in our global variable
 
    hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      350, 100, 320 * 4 + 100, 200 * 4 + 100, nullptr, nullptr, hInstance, nullptr);
+      100, 100, 320 * 4 + 100, 200 * 4 + 100, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {
@@ -286,13 +269,13 @@ void vram_to_bmp(LPBYTE pd, uint8_t* ps) {
       uint8_t p1 = p >> 4;
       uint8_t p2 = p & 0x0f;
 
-      *pd++ = palette[p1][0];
-      *pd++ = palette[p1][1];
       *pd++ = palette[p1][2];
+      *pd++ = palette[p1][1];
+      *pd++ = palette[p1][0];
 
-      *pd++ = palette[p2][0];
-      *pd++ = palette[p2][1];
       *pd++ = palette[p2][2];
+      *pd++ = palette[p2][1];
+      *pd++ = palette[p2][0];
 
       ps++;
     }
@@ -360,10 +343,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
           FillRect(drawDC, &rcClient, backgroundBrush);
 
           if (bmpRender) {
-            vram_to_bmp(pbmpRender, screen); // screen
+            vram_to_bmp(pbmpRender, vram[2]); // screen
             StretchDIBits(drawDC, rcView.left, rcView.top, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
-            vram_to_bmp(pbmpRender, vram[2]); // background
+            vram_to_bmp(pbmpRender, screen); // background
             StretchDIBits(drawDC, rcView.left + (rcView.right - rcView.left) / 2, rcView.top, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
             vram_to_bmp(pbmpRender, vram[0]); // framebuffer 1
