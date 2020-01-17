@@ -5,6 +5,7 @@
   big endian
 */
 
+#include <assert.h>
 #include <string.h>
 #include <algorithm>
 
@@ -14,6 +15,7 @@ namespace another_world {
 
   #define REG_RANDOM_SEED 0x3c
   #define THREAD_INACTIVE 0xffff
+  #define NO_UPDATE 0xffff
 
   // helpers to fetch values stored in big endian and convert
   // them into stdint types
@@ -28,9 +30,11 @@ namespace another_world {
   }
 
   bool (*read_file)(std::wstring filename, uint32_t offset, uint32_t length, char* buffer) = nullptr;
-  void (*debug)(std::string message) = nullptr;
+  void (*debug)(const char *fmt, ...) = nullptr;
+  void (*debug_log)(const char *fmt, ...) = nullptr;
   void (*update_screen)(uint8_t* buffer) = nullptr;
-  void (*tick_yield)(uint32_t ticks) = nullptr;
+  void (*set_palette)(uint16_t* palette) = nullptr;
+  void (*debug_yield)() = nullptr;
 
   std::vector<Resource *> resources;
 
@@ -61,7 +65,7 @@ namespace another_world {
     {0x14, 0x15, 0x16, 0x00},
     {0x17, 0x18, 0x19, 0x00},
     {0x1a, 0x1b, 0x1c, 0x11},
-    {0x1e, 0x1e, 0x1f, 0x11},
+    {0x1d, 0x1e, 0x1f, 0x11},
     {0x20, 0x21, 0x22, 0x11},
     {0x23, 0x24, 0x25, 0x00},
     {0x26, 0x27, 0x28, 0x11},
@@ -121,11 +125,11 @@ namespace another_world {
           heap_offset += resource->size;
         }
 
-        debug("Loading resource of type " + std::to_string(resource->type) + " at offset " + std::to_string(heap_offset));
+        //debug("Loading resource of type " + std::to_string(resource->type) + " at offset " + std::to_string(heap_offset));
         resource->load(destination);      
 
         if(resource->type == Resource::Type::IMAGE) {
-          /* copy image to video buffer */
+          /* copy image to backbuffer */
           resource->state = Resource::State::NOT_NEEDED;
         } else {
           resource->state = Resource::State::LOADED;
@@ -223,8 +227,15 @@ namespace another_world {
     program_counter[0] = 0; 
   }
 
-  uint8_t VirtualMachine::fetch_byte(uint8_t *b, uint16_t* c) {
+  uint8_t VirtualMachine::fetch_byte(uint8_t *b, uint32_t *c) {
     uint8_t v = b[*c];
+    (*c)++;
+    return v;
+  }
+
+  uint16_t VirtualMachine::fetch_word(uint8_t *b, uint32_t *c) {
+    uint16_t v = read_uint16_bigendian(&b[*c]);
+    (*c)++;
     (*c)++;
     return v;
   }
@@ -242,21 +253,27 @@ namespace another_world {
     return v;
   }
 
-  
+  void VirtualMachine::point(uint8_t* target, uint8_t color, Point* point) {
+    if (point->x & 0b1) {
+      target[(point->y * 160) + (point->x / 2)] &= 0xf0;
+      target[(point->y * 160) + (point->x / 2)] |= color & 0x0f;
+    }
+    else {
+      target[(point->y * 160) + (point->x / 2)] &= 0x0f;
+      target[(point->y * 160) + (point->x / 2)] |= color & 0xf0;
+    }
+  }
 
-  /**
- * Draw a polygon from a std::vector<point> list of points.
- *
- * \param[in] points `std::vector<point>` of points describing the polygon.
- */
-  void polygon(uint8_t *target, uint8_t color, Point *points, uint8_t point_count) {
-    static int32_t nodes[256]; // maximum allowed number of nodes per scanline for polygon rendering
+  void VirtualMachine::polygon(uint8_t *target, uint8_t color, Point *points, uint8_t point_count) {
+    static int32_t nodes[256]; // maximum allowed number of nodes per scanline for polygon rendering    
 
-    Rect clip = { 0, 0, 319, 119 };
+    Rect clip = { 0, 0, 320, 200 };
     int16_t miny = points[0].y, maxy = points[0].y;
 
-    color &= 0x0f;
-    color = color | (color << 4);
+    // copy the colour value into the high and low nibbles making
+    // it easier to use later
+    uint8_t c = color & 0x0f;
+    c = c | (c << 4);
 
     for (uint16_t i = 1; i < point_count; i++) {
       miny = std::min(miny, points[i].y);
@@ -295,37 +312,184 @@ namespace another_world {
 
       for (uint16_t i = 0; i < n; i += 2) {
         // TODO: make this faster
-        for (uint16_t x = nodes[i]; x < nodes[i + 1] - nodes[i]; x++) {
-          if (x & 0b1) {
-            target[(p.y * 160) + (x / 2)] &= 0xf0;
-            target[(p.y * 160) + (x / 2)] |= color & 0x0f;
-          } else {
-            target[(p.y * 160) + (x / 2)] &= 0x0f;
-            target[(p.y * 160) + (x / 2)] |= color & 0xf0;
-          }          
+        for (uint16_t x = nodes[i]; x < nodes[i + 1]; x++) {
+          if (color < 0b00010000) { 
+            // draw in the colour requested
+            if (x & 0b1) {
+              target[(p.y * 160) + (x / 2)] &= 0xf0;
+              target[(p.y * 160) + (x / 2)] |= c & 0x0f;
+            }
+            else {
+              target[(p.y * 160) + (x / 2)] &= 0x0f;
+              target[(p.y * 160) + (x / 2)] |= c & 0xf0;
+            }
+          }
+          else if (color > 0b00010000) {
+            // copy data from the visible(TODO: confirm?) frame buffer            
+            if (x & 0b1) {
+              target[(p.y * 160) + (x / 2)] &= 0xf0;
+              target[(p.y * 160) + (x / 2)] |= visible_vram[(p.y * 160) + (x / 2)] & 0x0f;
+            }
+            else {
+              target[(p.y * 160) + (x / 2)] &= 0x0f;
+              target[(p.y * 160) + (x / 2)] |= visible_vram[(p.y * 160) + (x / 2)] & 0xf0;
+            }
+          }
+          else {
+            // special blend mode, set the high bit of the colour (to offset the drawn color
+            // palette index by 8. This is used to overlay colours (like the headlights of
+            // the car during the intro animation) and requires the palettes to be carefully
+            // setup to achieve the effect.
+            if (x & 0b1) {
+              target[(p.y * 160) + (x / 2)] |= 0x08;
+            }
+            else {
+              target[(p.y * 160) + (x / 2)] |= 0x80;
+            }
+          }
         }
       }      
     }
+
+    debug_yield();
   }
 
-  void VirtualMachine::draw_polygon(uint8_t color, Point p, uint8_t *buffer, uint16_t offset) {
-    static Point points[64];
+  void VirtualMachine::draw_shape(uint8_t color, Point pos, uint8_t zoom, uint8_t *buffer, uint32_t *offset) {
+    uint8_t shape_header = fetch_byte(buffer, offset);
 
-    uint16_t width = fetch_byte(buffer, &offset);
-    uint16_t height = fetch_byte(buffer, &offset);
-    uint8_t point_count = fetch_byte(buffer, &offset);
-    debug("  - " + std::to_string(point_count) + " points");
+    // the top two bits of the shape header determine what to draw
+    //
+    // 11xxxxxx - single polygon
+    // 01xxxxxx - ???
+    // 10xxxxxx - ???
+    // 00xxxxxx - ???
+    //
+    // Eric Chahi documents another special case where the header is
+    // 63 (11000000) which states "fin du bloc matrice" - i suspect originally
+    // the plan was to mark the end of a polygon group this way but ultimately
+    // he decided to include the count in the bytecode? not sure...
+    
+    debug_log("                shape");
 
-    for (uint8_t i = 0; i < point_count; i++) {
-      points[i].x = fetch_byte(buffer, &offset) + p.x - (width / 2);
-      points[i].y = fetch_byte(buffer, &offset) + p.y - (height / 2);
+    if ((shape_header & 0b11000000) == 0b11000000) {
+      // draw a single polygon
+      // bits 0-5 of the header contain the colour of the polygon being drawn
+      // TODO: if the colour is set here why are we passing it in as a parameter?      
+      if(color & 0x80) {
+        color = shape_header & 0x3f;      
+      }
+      draw_polygon(color, pos, zoom, buffer, offset);
+    }
+    else {
+      // draw a polygon group
+      // bits 0-5 of the header seem to always contain the number 2. 
+      // why? we just don't know
+      if ((shape_header & 0x3f) == 2) {
+        draw_polygon_group(color, pos, zoom, buffer, offset);
+      }
+      else {
+        // ???
+        //assert(false);
+      }
     }
 
-    polygon(vram[1], color, points, point_count);
   }
 
-  void VirtualMachine::tick() {
-    debug("Start of thread execution");
+  void VirtualMachine::draw_polygon(uint8_t color, Point pos, uint8_t zoom, uint8_t *buffer, uint32_t *offset) {
+    static Point points[256];
+
+    // polygons are drawn offset by the centre of their bounding box
+    Rect bounds;
+    bounds.w = fetch_byte(buffer, offset) * zoom / 64;
+    bounds.h = fetch_byte(buffer, offset) * zoom / 64;    
+    bounds.x = pos.x - bounds.w / 2;
+    bounds.y = pos.y - bounds.h / 2;     
+
+    // TODO: could do a quick bounds check here to test if on screen at all
+
+    // load in the point data for this polygon and offset/scale accordingly
+    int16_t point_count = fetch_byte(buffer, offset);
+
+    debug_log("                polygon %d points", point_count);
+
+    for (uint8_t i = 0; i < point_count; i++) {
+      points[i].x = bounds.x + fetch_byte(buffer, offset) * zoom / 64;
+      points[i].y = bounds.y + fetch_byte(buffer, offset) * zoom / 64;
+    }
+
+    // check if we have just a point to draw
+    if (bounds.w == 0 && bounds.h == 1) {
+      point(working_vram, color, &pos);
+    } else {
+      polygon(working_vram, color, points, point_count);
+    }    
+  }
+
+  void VirtualMachine::draw_polygon_group(uint8_t color, Point pos, uint8_t zoom, uint8_t* buffer, uint32_t *offset) {
+    pos.x -= fetch_byte(buffer, offset) * zoom / 64;
+    pos.y -= fetch_byte(buffer, offset) * zoom / 64;
+
+    int8_t count = fetch_byte(buffer, offset);
+
+    debug_log("                polygon group %d children", count);
+
+    for (uint8_t i = 0; i < count; i++) {
+      uint16_t header = fetch_word(buffer, offset);
+
+      // absolute position of shape (added to relative positions later)
+      Point polygon_pos = { pos.x, pos.y };
+      polygon_pos.x += fetch_byte(buffer, offset) * zoom / 64;
+      polygon_pos.y += fetch_byte(buffer, offset) * zoom / 64;
+
+      // the high bit of the header tells us whether this shape has a custom colour
+      // or uses the colour we used previously.
+      // if it is set then we need to pull the new colour from the bytecode
+      if (header & 0x8000) {
+        color = fetch_byte(buffer, offset);
+
+        // if the high bit of the colour is set then we need to also fetch
+        // the mask number
+        if(color & 0x80) {
+          fetch_byte(buffer, offset);
+        }
+
+        color &= 0x7f; // discard high bit
+      }
+
+      uint32_t child_offset = (header & 0x7fff) * 2;
+      draw_shape(color, polygon_pos, zoom, buffer, &child_offset);
+    }
+  }
+
+  uint8_t* VirtualMachine::get_vram_from_id(uint8_t id) {
+    // screen id 0 is unclear from Eric Chahi's notes he says 
+    // "set pour la couleur masque" which translates to "set for
+    // the colour mask"? not sure what that means...
+    //
+    //   0 - vram[2] background 
+    //   1 - vram[0] foreground buffer 1 
+    //   2 - vram[1] foreground buffer 2
+    //   3 - vram[2] background
+    //
+    // 254 - currently visible foreground buffer
+    // 255 - currently invisible foreground buffer
+    if (id < 3) {
+      return vram[id == 0 ? 2 : id - 1];
+    }
+
+    if (id == 254) {
+      return visible_vram;
+    }
+
+    if (id == 255) {
+      return visible_vram == vram[0] ? vram[1] : vram[0];
+    }
+
+    return nullptr;
+  }
+
+  void VirtualMachine::execute_threads() {
+    debug_log("--- execute threads ---");
     // TODO: switch part if needed (can't this be done in the op code processing?)
   
         //  //Check if a part switch has been requested.
@@ -335,75 +499,72 @@ namespace another_world {
         // 	}
 
 
-    // TODO: perform a jump operation if needed (can't this be done in the op code processing?)
-        // for (int threadId = 0; threadId < VM_NUM_THREADS; threadId++) {
-
-        // 	vmIsChannelActive[CURR_STATE][threadId] = vmIsChannelActive[REQUESTED_STATE][threadId];
-
-        // 	uint16_t n = threadsData[REQUESTED_PC_OFFSET][threadId];
-
-        // 	if (n != VM_NO_SETVEC_REQUESTED) {
-
-        // 		threadsData[PC_OFFSET][threadId] = (n == 0xFFFE) ? VM_INACTIVE_THREAD : n;
-        // 		threadsData[REQUESTED_PC_OFFSET][threadId] = VM_NO_SETVEC_REQUESTED;
-        // 	}
-        // }
-
-    // TODO: handle input and player update
+     // TODO: handle input and player update
 	    //	vm.inp_updatePlayer();
 	    //	processInput();
 
-    std::string opcode_names[29] = {
-      "movl", "movr", "addr", "addl", 
-      "call", "ret", "pause thread", "jmp", 
-      "create thread", "jnz", "cjmp", "set palette", 
-      "reset thread", "select vram", "fill vram", "copy vram", 
-      "vram to screen", "kill thread", "draw text", "subr", 
-      "andl", "orl", "shll", "shrl", 
-      "play sound", "load resource", "play music"
-    };
+
 
     uint32_t ticks = 0;
 
-	  //	vm.hostFrame();
-    for(uint8_t i = 0; i < THREAD_COUNT; i++) {
-      if(program_counter[i] != THREAD_INACTIVE) {
-        // execute thread
-        debug("Switch to thread " + std::to_string(i));
+    // ensure the call stack is empty before starting
+    call_stack.clear();
 
+    // during thread execution the svec opcode allows a thread
+    // to be given a new program counter for the next cycle of
+    // execution, we store those here and update the program
+    // counters after all threads have been processed if needed
+    uint16_t  new_program_counter[THREAD_COUNT];
+    for (uint8_t i = 0; i < THREAD_COUNT; i++) {
+      new_program_counter[i] = NO_UPDATE;
+    }
+	  
+    // step through each thread and execute the active ones
+    for(uint8_t i = 0; i < THREAD_COUNT; i++) {
+      if(program_counter[i] != THREAD_INACTIVE) {        
         uint16_t *pc = &program_counter[i];
 
         bool next_thread = false;
         while(!next_thread) {
           ticks++;
 
-          
-
           uint8_t opcode = fetch_byte(pc);
 
-          std::string opcode_name = "invalid";
+          std::string opcode_name = "----";
           if (opcode <= 0x1a) {
             opcode_name = opcode_names[opcode];
           } else if (opcode < 0x40) {
             // invalid
           } else if (opcode < 0x80) {
-            opcode_name = "draw polygon sprite";
+            opcode_name = "plyfg";
           } else {
-            opcode_name = "draw polygon background";
+            opcode_name = "plybg";
+          }
+          
+          debug_log("%2i [%05u] > %02x:%-6s", i, *(pc) - 1, opcode, opcode_name.c_str());
+
+          if ((opcode & 0x3f) == 0x3f) {
+            assert(false);
           }
 
+          // opcodes come in three different flavours depending on the status
+          // of the two highest bits
+          //
+          // 00xxxxxx = standard opcode instruction number in bits 0-5
+          // 01xxxxxx = polygon opcode long format (translated from Eric Chahi's "different format de donnees pour spr.l")
+          // 1xxxxxxx = polygon opcode short format (high part of address in bits 0-6)
 
-          debug(": " + opcode_name + " (" + std::to_string(opcode) + ") [" + std::to_string(i) + "]");
+          if (opcode & 0x80) {
+            // contains offset for polygon data in cinematic data resource  
+            // the high bits of the address are 0-6 from the opcode
+            uint32_t offset = (((opcode & 0x7f) << 8) | fetch_byte(pc)) * 2;
 
-          if(opcode & 0x80) {
-            // calculate offset into polygon data to start drawing from
-            // the remaining bits of the opcode (hence masking with 0x7f) 
-            // contain the high byte off the offset, and the next byte 
-            // contains the low byte.
-            uint16_t offset = (((opcode & 0x7f) << 8) | fetch_byte(pc)) * 2;    // contains offset for polygon data in cinematic data resource    
-            
+            uint8_t* polygon_data = background->data;
+
             // absolute position of shape (added to relative positions later)
-            Point pos = { fetch_byte(pc), fetch_byte(pc) };
+            Point pos;
+            pos.x = fetch_byte(pc);
+            pos.y = fetch_byte(pc);
 
             // slightly weird one this. if the y value is greater than 199
             // then the extra is added onto the x value. i assume this is because
@@ -417,208 +578,201 @@ namespace another_world {
               pos.y = 199;
             }
             
-            uint8_t polygon_header = fetch_byte(background->data, &offset);
-            
-            if (polygon_header & 0xc0) {
-              // draw a single polygon, the colour is encoded into the header
-              uint8_t color = polygon_header & 0x3f;
-              draw_polygon(color, pos, background->data, offset);
-            } else {
-              //draw_polygon_list();
-            }
-
-            // 
-            //vram[0][x / 2 + y * 160] = 0xff;
-            // readAndDrawPolygon using data in cinematic resource
-            tick_yield(ticks);
+            draw_shape(0xff, pos, 64, polygon_data, &offset);
 
             continue;
           }
 
-          if(opcode & 0x40) {
-            debug("- Not implemented! Polygons");
-            // special polygon opcodes
-            uint16_t off = ((opcode << 8) | fetch_byte(pc)) * 2;    // contains offset for polygon data in cinematic      
-            fetch_byte(pc);
-
-            if (!(opcode & 0x20)) 
-            {
-              if (!(opcode & 0x10))  // 0001 0000 is set
-              {
-                fetch_byte(pc);
-                //x = (x << 8) | _scriptPtr.fetchByte();
-              } else {
-                //x = vmVariables[x];
-              }
-            } 
-            else 
-            {
-              if (opcode & 0x10) { // 0001 0000 is set
-                //x += 0x100;
-              }
-            }
-
-            fetch_byte(pc);
-
-            if (!(opcode & 8))  // 0000 1000 is set
-            {
-              if (!(opcode & 4)) { // 0000 0100 is set
-              fetch_byte(pc);
-                //y = (y << 8) | _scriptPtr.fetchByte();
-              } else {
-                //y = vmVariables[y];
-              }
-            }
-
-            fetch_byte(pc);
-
-            if (!(opcode & 2))  // 0000 0010 is set
-            {
-              if (!(opcode & 1)) // 0000 0001 is set
-              {
-                (*pc)--; // move the program counter backwards 1?!?!! // TODO: WHY?!
-                //--_scriptPtr.pc;
-                //zoom = 0x40;
-              } 
-              else 
-              {
-                //zoom = vmVariables[zoom];
-              }
-            } 
-            else 
-            {
+          if(opcode & 0x40) {   
+            // contains offset for polygon data in cinematic data resource    
+            // the offset is contained in the next two bytes in the bytecode
+            uint32_t offset = fetch_word(pc) * 2;
             
-              if (opcode & 1) { // 0000 0001 is set
-                //res->_useSegVideo2 = true;
-                (*pc)--; // move the program counter backwards 1?!?!! // TODO: WHY?!
-                //--_scriptPtr.pc;
-                //zoom = 0x40;
-              }
-            }      
+            uint8_t* polygon_data = background->data;
+
+            Point pos;
+
+            // bits 0-5 of the opcode have special meaning that manipulate the
+            // x and y coordinates for this polygon.
+            //
+            // the bits 0-5 are laid out aabbcc with each pair of bits (e.g "aa")
+            // selecting an operation to perform.
+
+            if ((opcode & 0b00110000) == 0b00110000) {
+              // if xx == 11 then add 256 to x (essentially x gains an extra
+              // bit of resolution)
+              pos.x = fetch_byte(pc) + 256;
+            } else if ((opcode & 0b00110000) == 0b00010000)  {
+              // if xx == 01 then the x value is selected from the specified register
+              pos.x = registers[fetch_byte(pc)];
+            } else if ((opcode & 0b00110000) == 0b00000000) {
+              // if xx == 00 then the x value is read from the next two bytes of
+              // bytecode
+              pos.x = fetch_word(pc);
+            }
+            else {
+              // otherwise the x value is simply the next byte of bytecode
+              pos.x = fetch_byte(pc);
+            }
+
+            if ((opcode & 0b00001100) == 0b00001100) {
+              // if yy == 11 then add 256 to y (essentially y gains an extra
+              // bit of resolution)
+              pos.y = fetch_byte(pc) + 256;
+            }
+            else if ((opcode & 0b00001100) == 0b00000100) {
+              // if yy == 01 then the y value is selected from the specified register
+              pos.y = registers[fetch_byte(pc)];
+            }
+            else if ((opcode & 0b00001100) == 0b00000000) {
+              // if yy == 00 then the y value is read from the next two bytes of
+              // bytecode
+              pos.y = fetch_word(pc);
+            }
+            else {
+              // otherwise the y value is simply the next byte of bytecode
+              pos.y = fetch_byte(pc);
+            }
+
+            uint16_t zoom = 64;
+
+            if ((opcode & 0b00000011) == 0b00000011) {
+              // if zz == 11 then something special happens...
+              // why? we don't know, but it does! the notes in Eric
+              // Chahi's document are not really legible, perhaps
+              // something like... "11 si Z utiliser Z~~~~ Banque et Z = 64"?
+              // Fabien Sanglard has this special case change the source of
+              // polygon data to "SegVideo2" which I think is meant to be the
+              // character data, anyway, let's try that...
+              polygon_data = characters->data;
+            }
+            else if ((opcode & 0b00000011) == 0b00000001) {
+              // if zz == 01 then the z value is selected from the specified register
+              zoom = registers[fetch_byte(pc)];
+            }
+            else if ((opcode & 0b00000011) == 0b00000000) {
+              // default zoom level, already set above
+            }
+            else {
+              // otherwise the z value is simply the next byte of bytecode
+              zoom = fetch_byte(pc);
+            }
+
+            draw_shape(0xff, pos, zoom, polygon_data, &offset);
 
             continue;
           }
 
           switch(opcode) {
             case 0x00: {
-              // move literal into register
-              uint8_t r = fetch_byte(pc);
-              int16_t v = fetch_word(pc);
-              registers[r] = v;          
+              // movi   d0, #1234
+              // copy immediate word to register d0
+              uint8_t d0 = fetch_byte(pc);
+              int16_t w = fetch_word(pc);
+              registers[d0] = w;
               break;
             }
 
             case 0x01: {
-              // copy register into register
-              uint8_t d = fetch_byte(pc);
-              uint8_t s = fetch_byte(pc);
-              registers[d] = registers[s];
+              // mov    d0, d1
+              // copy value in register d1 into register d0
+              uint8_t d0 = fetch_byte(pc);
+              uint8_t d1 = fetch_byte(pc);
+              registers[d0] = registers[d1];
               break;
             }
 
             case 0x02: {
-              // add register to register
-              uint8_t d = fetch_byte(pc);
-              uint8_t s = fetch_byte(pc);
-              registers[d] += registers[s];
+              // add    d0, d1
+              // add value in register d1 to to register d0
+              uint8_t d0 = fetch_byte(pc);
+              uint8_t d1 = fetch_byte(pc);
+              registers[d0] += registers[d1];
               break;
             }
 
             case 0x03: {
-              // add literal to register
-              uint8_t r = fetch_byte(pc);
-              int16_t v = fetch_word(pc);
-              registers[r] += v;          
+              // addi   d0, #1234
+              // add immediate word to register d0
+              uint8_t d0 = fetch_byte(pc);
+              int16_t w = fetch_word(pc);
+              registers[d0] += w;
               break;
             }
 
-            case 0x04: {
-              debug("Call new location - stack size " + std::to_string(call_stack.size()));
-
-              // save the current byte code position on the call stack
-              // and jump to the new specific position
-              int16_t o = fetch_word(pc);
+            case 0x04: {              
+              // call   #1234
+              // push current program counter onto stack then jump to specified address
+              int16_t w = fetch_word(pc);
               call_stack.push_back(*pc);
-              *pc = o;
-
+              *pc = w;
               break;
             }
 
             case 0x05: {
-              debug("Return previous location - stack size " + std::to_string(call_stack.size()));
-
-              // return to the last bytecode position on the call stack
-              int16_t o = call_stack.back();
+              // ret
+              // pop last address off the stack and jump there (return from a call)
+              *pc = call_stack.back();
               call_stack.pop_back();
-              *pc = o;
-
               break;
             }
 
             case 0x06: {
-              // pause thread, jumps to next iteration of thread loop
-              
-              // TODO: ? do we want to do this to ensure next time this thread runs 
-              // it hits the pause instruction again? if we don't then the program
-              // counter will have passed the pause instruction and the thread will
-              // execute the next opcode next time round. suspect we do...
-              //(*pc)--; 
-
+              // brk
+              // stop execution of this thread and switch execution to the next thread              
               next_thread = true;
               break;
             }
 
             case 0x07: {
-              // jump to new position in byte code
-              int16_t o = fetch_word(pc);
-              *pc = o;
+              // jmp    #1234
+              // jump to specified address
+              int16_t w = fetch_word(pc);
+              *pc = w;
               break;
             }
 
             case 0x08: {
-              // create thread - sets up another thread to run
+              // svec   #12, #1234
+              // change the program counter of a thread
               uint8_t thread_id = fetch_byte(pc);
-              int16_t start_pc = fetch_word(pc);
-
-              debug("Create thread " + std::to_string(thread_id) + " starting at " + std::to_string(start_pc));
-              program_counter[thread_id] = start_pc;
-
+              int16_t new_pc = fetch_word(pc);
+              new_program_counter[thread_id] = new_pc;
               break;
             }
 
             case 0x09: {
-              // decrement register and jump if not zero
-              uint8_t r = fetch_byte(pc);
-              int16_t o = fetch_word(pc);
+              // djnz   d0, #1234
+              // decrement register and jump to specified address if not zero
+              uint8_t d0 = fetch_byte(pc);
+              int16_t w = fetch_word(pc);
 
-              registers[r]--;
+              registers[d0]--;
 
-              if(registers[r] != 0) {
-                *pc = o;
+              if(registers[d0] != 0) {
+                *pc = w;
               }
-
               break;
             }
 
             case 0x0a: {
-              // conditional jump based on whether expression (determined by `t`)
-              // is true or false
+              // cjmp   #12, d0, d1 or #1234, #1234
+              // conditional jump for expression when d0 compared to either
+              // d1 or an immediate byte or word value if expression result 
+              // is true then jump to specified address
               uint8_t t = fetch_byte(pc);          
               int16_t a = registers[fetch_byte(pc)];
-              int16_t b;
-              uint8_t c = fetch_byte(pc);
-              int16_t o = fetch_word(pc);
+              int16_t b = fetch_byte(pc);
 
               if(t & 0x80) {
                 // register to register comparison
-                b = registers[c];         
+                b = registers[b];         
               } else if (t & 0x40) {
                 // register to 16-bit literal comparison
-                b = (c << 8) | fetch_byte(pc);   
-              }else{
-                // register to 8-bit literal comparison
-                b = c;
+                b = (b << 8) | fetch_byte(pc);   
               }
+
+              int16_t w = fetch_word(pc);
 
               bool result = false;
             
@@ -632,106 +786,159 @@ namespace another_world {
               if(t == 5) { result = a <= b; }
 
               if(result) {
-                *pc = o;
+                *pc = w;
               }           
-
               break;
             }
 
             case 0x0b: {
-              // perform a palette change
+              // pal    #12, #12
+              // specify the index of the palette to use
               uint8_t palette_id = fetch_byte(pc);
 
               // TODO: from Eric Chahi's original notes the second byte of
-              // this instruction appears to be a "speed" for the
-              // palette change - but then parts of the notes are
+              // this instruction appears to be a speed ("a la vitesse") 
+              // for the palette change - but then parts of the notes are
               // crossed out suggesting it was never implemented?
               uint8_t speed = fetch_byte(pc);
 
-              // TODO: set_palette(palette_id);
+              // calculate the offset for the requested palette
+              uint16_t offset = palette_id * 32;
+              
+              // the first 32 palettes are for the Amiga/VGA version, the
+              // following 32 palettes are for the MSDOS version              
+              // offset += (32 * 32); // offset to EGA/TGA
 
+              set_palette((uint16_t *)&palette->data[offset]);
               break;
             }
 
-            case 0x0c: {
-              debug("- Not implemented! Reset thread");
-              // op_resetThread
-              uint8_t thread_id = fetch_byte(pc);
-              uint8_t i = fetch_byte(pc);
-              uint8_t a = fetch_byte(pc);
+            case 0x0c: {              
+              // ???    #12, #12, #12
+              // this one is a bit cryptic with Eric Chahi's notes 
+              // referring  to the first "1st affecte"/"start" and last 
+              // "dernier affecte"/"end" vectors affected along with a 
+              // "type" of action (unlock, lock, clear)
+              // it suggests that this opcode should affect a range of
+              // threads, perhaps updating their state in bulk?
+              assert(false); // not sure this ever gets called
+
+              uint8_t first = fetch_byte(pc);
+              uint8_t last = fetch_byte(pc);
+              uint8_t type = fetch_byte(pc);
+
+              for (uint8_t thread_id = first; thread_id <= last; thread_id++) {
+                if (type == 0) {
+                  // unlock
+                  // program_counter[thread_id] = ??
+                }
+                if (type == 1) {
+                  // lock 
+                  // program_counter[thread_id] = ??
+                }
+                if (type == 2) {
+                  // clean
+                  // program_counter[thread_id] = ??
+                }
+                
+              }
               break;
             }
 
- // _curPagePtr1 is the backbuffer 
- // _curPagePtr2 is the frontbuffer
- // _curPagePtr3 is the background builder.
 
             case 0x0d: {
-              // select working video buffer             
+              // setws    #12
+              // set the working screen for drawing operations
               uint8_t id = fetch_byte(pc);
-              active_vram = vram[id];
+              uint8_t *b = get_vram_from_id(id);
+
+              if(b) {
+                // TODO: why would we ever be given an invalid screen id?
+                // that doesn't seem right...
+                working_vram = b;
+              }              
               break;
             }
 
             case 0x0e: {
-              // clears an entire video buffer with the specified palette colour              
+              // clr    #12, #12
+              // clears an entire backbuffer with the specified palette
+              // colour              
               uint8_t id = fetch_byte(pc);
-
-              if (id >= 3) {
-                id = 0;
-              }
+              uint8_t* d = get_vram_from_id(id);              
 
               uint8_t color = fetch_byte(pc);
               color |= color << 4;
-              memset(vram[id], color, 320 * 200 / 2);
 
+              if(d) {
+                // TODO: why would we ever be given an invalid screen id?
+                // that doesn't seem right...
+                memset(d, color, 320 * 200 / 2);
+              }
               break;
             }
 
             case 0x0f: {
-              // copy one video buffer into another
+              // vcpy   #12, #12
+              // copy contents of one backbuffer into another
               uint8_t src_id = fetch_byte(pc);
               uint8_t dest_id = fetch_byte(pc);
 
-              if (src_id < 3 && dest_id < 3) {  // TODO: this is wrong
-                memcpy(vram[dest_id], vram[src_id], 320 * 200 / 2);
+              uint8_t *s = get_vram_from_id(src_id);
+              uint8_t *d = get_vram_from_id(dest_id);
+              
+              if(s && d) {
+                // TODO: why would we ever be given an invalid screen id?
+                // that doesn't seem right...
+                memcpy(d, s, 320 * 200 / 2);
               }
-
+              
               // TODO: this should support vertical scrolling by looking the
               // value in register VM_VARIABLE_SCROLL_Y
               // e.g. video->copyPage(srcPageId, dstPageId, vmVariables[VM_VARIABLE_SCROLL_Y]);
-
               break;
             }
 
             case 0x10: {
-              // copy video buffer into display backbuffer
+              // vshw   #12
+              // copy specified backbuffer to screen
               uint8_t id = fetch_byte(pc);
 
-              // from Eric Chahi's notes:
-              // "si n == 255 on flip invisi et visi"
-
-              if (id == 0xff) {
-                uint8_t* t = vram[0];
-                vram[0] = vram[1];
-                vram[1] = t;
+              if(id == 0xff) {
+                // from Eric Chahi's notes:
+                // "si n == 255 on flip invisi et visi" so in case the
+                // id specified is 255 we swap which of the backbuffers
+                // is the visible one
+                visible_vram = visible_vram == vram[0] ? vram[1] : vram[0];
+                
+                // TODO: do we also need to update the screen? it's unclear
+                // but it seems like the thing you'd want to do right after
+                // swapping backbuffers
+                update_screen(visible_vram);
               } else {
-                update_screen(vram[id]);
+                uint8_t* b = get_vram_from_id(id);
+
+                if(b) {
+                  // TODO: why would we ever be given an invalid screen id?
+                  // that doesn't seem right...
+                  update_screen(b);
+                }
               }
 
               break;
             }
 
             case 0x11: {
-              // kill thread by marking it inactive and moving to the next thread
-              *pc = 0xffff;
+              // kill
+              // set current threads program counter to 0xffff (inactive) and 
+              // moveto the next thread
+              *pc = THREAD_INACTIVE;
               next_thread = true;
               break;
             }
 
             case 0x12: {
-              debug("- Not implemented! Draw string");
-              // op_drawString
+              // text   #1234, #12, #12, #12
               uint16_t string_id = fetch_word(pc);
               uint8_t x = fetch_byte(pc);
               uint8_t y = fetch_byte(pc);
@@ -739,21 +946,20 @@ namespace another_world {
 
               if (string_id < string_table.size()) {
                 const std::string& string_entry = string_table.at(string_id);
-                debug("- " + string_entry);
+                debug(string_entry.c_str());
               }
               else {
-                debug("! tried to draw invalid string " + std::to_string(string_id));
+                // TODO: why would we ever get an invalid string id?
+                assert(false);
               }
-              
-              
 
               // TODO: make this work?
-
               break;
             }
 
             case 0x13: {          
-              // subtract register from register
+              // sub  d0, d1
+              // subtract value in register d1 from register d0
               uint8_t d = fetch_byte(pc);
               uint8_t s = fetch_byte(pc);
               registers[d] -= registers[s];           
@@ -761,7 +967,8 @@ namespace another_world {
             }
 
             case 0x14: {
-              // boolean and register with literal
+              // andi  d0, #1234
+              // bitwise AND register d0 with the value provided
               uint8_t r = fetch_byte(pc);
               int16_t v = fetch_word(pc);
               registers[r] = (uint16_t)registers[r] & v;
@@ -769,7 +976,8 @@ namespace another_world {
             }
 
             case 0x15: {
-              // boolean or register with literal
+              // andi  d0, #1234
+              // bitwise OR register d0 with the value provided
               uint8_t r = fetch_byte(pc);
               int16_t v = fetch_word(pc);
               registers[r] = (uint16_t)registers[r] | v;
@@ -777,7 +985,12 @@ namespace another_world {
             }
 
             case 0x16: {
-              // left shift register by value
+              // shli  d0, #1234
+              // shift value in register d0 left by value provided
+
+              // TODO: seems odd the shift value is 16-bit since
+              // shifting by anything more than 16 will zero out the
+              // register
               uint8_t r = fetch_byte(pc);
               int16_t v = fetch_word(pc);
               registers[r] = (uint16_t)registers[r] << v;
@@ -785,7 +998,14 @@ namespace another_world {
             }
 
             case 0x17: {
-              // right shift register by value
+              // shri  d0, #1234
+              // shift value in register d0 right by value provided
+              // note: this shift is intentionally unsigned so new bits 
+              // are zero filled
+              
+              // TODO: seems odd the shift value is 16-bit since
+              // shifting by anything more than 16 will zero out the
+              // register
               uint8_t r = fetch_byte(pc);
               int16_t v = fetch_word(pc);
               registers[r] = (uint16_t)registers[r] >> v;
@@ -793,8 +1013,7 @@ namespace another_world {
             }
 
             case 0x18: {
-              debug("- Not implemented! Play sound");
-              // op_playSound
+              // snd  #1234, #12, #12, #12
               fetch_word(pc);
               fetch_byte(pc);
               fetch_byte(pc);
@@ -803,18 +1022,27 @@ namespace another_world {
             }
 
             case 0x19: {
-              // load resources or switch game part
+              // load   #1234
+              // loads either a resource or the next chapter of the
+              // game.
               uint16_t i = fetch_word(pc);
 
               if (i == 0) {
-                // TODO: quit?? 
+                // TODO: Eric Chahi's notes are hard to read here but say
+                // something like "libere la memoire annuler"
+                // sounds like perhaps this is "exit the game"?
+                // not sure - let's leave an assert here and see if it
+                // ever happens...
+                assert(false);
               } else {
                 if (i <= resources.size()) {
+                  // load a resource
                   resources[i]->state = Resource::State::NEEDS_LOADING;
                   load_needed_resources();
                 }
                 else {
-                  debug("Switch to chapter " + std::to_string(i));
+                  // switch to a new chapter
+                  assert(false);
                   initialise_chapter(i);
                 }
               }
@@ -823,8 +1051,7 @@ namespace another_world {
             }
 
             case 0x1a: {
-              debug("- Not implemented! Play music");
-              // op_playMusic
+              // music #1234, #1234, #12
               fetch_word(pc);
               fetch_word(pc);
               fetch_byte(pc);
@@ -832,7 +1059,7 @@ namespace another_world {
             }
 
             default: {
-              debug("- Invalid opcode " + std::to_string(opcode) + " on thread " + std::to_string(i));
+             // debug("- Invalid opcode " + std::to_string(opcode) + " on thread " + std::to_string(i));
               break;
             }
           }
@@ -840,6 +1067,15 @@ namespace another_world {
       }
     }
 
-    debug("End of thread execution");
+    // set thread program counters to their new requested
+    // values
+    for (uint8_t i = 0; i < THREAD_COUNT; i++) {
+      if (new_program_counter[i] != NO_UPDATE) {
+        program_counter[i] = new_program_counter[i];
+      }
+    }
+
+    // TODO: are we meant to blit to screen here?
+
   }
 }

@@ -1,6 +1,8 @@
 // AnotherWorld.cpp : Defines the entry point for the application.
 //
 
+#include <chrono>
+
 #include "framework.h"
 #include "AnotherWorld.h"
 
@@ -22,7 +24,36 @@ LPBYTE pbmpRender;
 HBITMAP bmpRender;
 RECT rcView;
 uint8_t screen[320 * 200 / 2];
+uint8_t palette[16][3];
 uint8_t pixelSize;
+std::chrono::steady_clock::time_point start;
+
+uint32_t now() {
+  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+  return (uint32_t)elapsed.count();
+}
+
+// from Erik Aronesty's response on https://stackoverflow.com/a/8098080
+std::string string_format(const std::string fmt, va_list ap) {
+  int size = ((int)fmt.size()) * 2 + 50;   // Use a rubric appropriate for your code
+  std::string str;
+  //va_list ap;
+  while (1) {     // Maximum two passes on a POSIX system...
+    str.resize(size);
+    //va_start(ap, fmt);
+    int n = vsnprintf((char*)str.data(), size, fmt.c_str(), ap);
+    //va_end(ap);
+    if (n > -1 && n < size) {  // Everything worked
+      str.resize(n);
+      return str;
+    }
+    if (n > -1)  // Needed size returned
+      size = n + 1;   // For null char
+    else
+      size *= 2;      // Guess at a larger size (OS specific)
+  }
+  return str;
+}
 
 VirtualMachine vm;
 
@@ -80,45 +111,88 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       return result && bytes_read == length;
     };
 
-    another_world::debug = [](std::string message) {      
-      std::wstring w(message.begin(), message.end());
-      //OutputDebugStringW(w.c_str());
-      //OutputDebugStringW(L"\n");
+    another_world::debug_log = [](const char *fmt, ...) {
+      static bool first = true; // if first run then open the file and truncate
+      va_list args;
+
+      std::wstring filename = L"vm.log";
+      va_start(args, fmt);
+      std::string line = string_format(fmt, args) + "\n";
+      va_end(args);
+      DWORD creation_mode = first ? CREATE_ALWAYS : OPEN_EXISTING;
+      HANDLE fh = CreateFile(filename.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, creation_mode, FILE_ATTRIBUTE_NORMAL, NULL);
+      SetFilePointer(fh, 0, NULL, FILE_END);
+      
+      WriteFile(fh, line.c_str(), line.length(), NULL, NULL);
+
+      CloseHandle(fh);
+
+      first = false;
     };
 
-    another_world::update_screen = [](uint8_t* buffer) {
+    another_world::debug = [](const char *fmt, ...) {
+      va_list args;
+      va_start(args, fmt);
+      std::string line = string_format(fmt, args) + "\n";
+      va_end(args);
+
+      std::wstring w(line.begin(), line.end());
+      OutputDebugStringW(w.c_str());
+    };
+
+    another_world::update_screen = [](uint8_t *buffer) {
       memcpy(screen, buffer, 320 * 200 / 2);
     };
 
-    another_world::tick_yield = [](uint32_t ticks) {
-      //InvalidateRect(hWnd, NULL, FALSE);
-      UpdateWindow(hWnd);
-      /*MSG msg;
-      while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-        if (WM_QUIT == msg.message) {
-          break;
-        }
+    another_world::set_palette = [](uint16_t* p) {
+      // sixten palette entries in the format 0x0RGB
+      for (uint8_t i = 0; i < 16; i++) {
+        uint16_t color = p[i];
 
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-        {
-          TranslateMessage(&msg);
-          DispatchMessage(&msg);
-        }
-      }*/
+        uint8_t r = (color & 0b0000111100000000) >> 8;
+        uint8_t g = (color & 0b0000000011110000) >> 4;
+        uint8_t b = (color & 0b0000000000001111) >> 0;
+        palette[i][0] = (r << 4) | (r & 0b1111);
+        palette[i][1] = (g << 4) | (g & 0b1111);
+        palette[i][2] = (b << 4) | (b & 0b1111); 
+
+
+        /* TODO: i thought the palette was 16-bit for the MSDOS version?
+
+        uint8_t r = (color & 0b1111100000000000) >> 11;
+        uint8_t g = (color & 0b0000011111100000) >> 5;
+        uint8_t b = (color & 0b0000000000011111) >> 0;
+
+        palette[i][0] = (r << 3) | (r & 0b111);
+        palette[i][1] = (g << 2) | (g & 0b011);
+        palette[i][2] = (b << 3) | (b & 0b111);*/
+      }
+    };
+
+    uint8_t v = 100;
+    uint8_t* pt = &v;
+    const uint8_t* pc = pt;
+
+    *pc++;
+
+
+    another_world::debug_yield = []() {
+     /* InvalidateRect(hWnd, NULL, FALSE);
+      UpdateWindow(hWnd);
+
+      Sleep(10);*/
     };
 
     load_resource_list();
     vm.init();
 
-    /*
-    resources[19]->state = Resource::State::NEEDS_LOADING;  // main screen
-    resources[20]->state = Resource::State::NEEDS_LOADING;  // main screen palette
-    load_needed_resources();
-    */
-
     // initialise the first chapter
     vm.initialise_chapter(16001);
     
+    start = std::chrono::steady_clock::now();
+
+    uint32_t last_frame_clock = now();
+
     while (true) {
       // if there is a message to process then do it
       if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -133,9 +207,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
       }
      
-      vm.tick();
+      uint32_t clock = now();
 
-      InvalidateRect(hWnd, NULL, FALSE);
+      // aim for 25 frames per second
+      if(clock - last_frame_clock > 20) {
+        uint32_t frame_start = now();
+        vm.execute_threads();
+        debug("Frame took %dms", now() - frame_start);
+        last_frame_clock = clock;
+        InvalidateRect(hWnd, NULL, FALSE);
+      }      
     }
 
 
@@ -185,7 +266,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    hInst = hInstance; // Store instance handle in our global variable
 
    hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+      350, 100, 320 * 4 + 100, 200 * 4 + 100, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {
@@ -205,16 +286,13 @@ void vram_to_bmp(LPBYTE pd, uint8_t* ps) {
       uint8_t p1 = p >> 4;
       uint8_t p2 = p & 0x0f;
 
-      p1 <<= 4;
-      p2 <<= 4;
+      *pd++ = palette[p1][0];
+      *pd++ = palette[p1][1];
+      *pd++ = palette[p1][2];
 
-      *pd++ = BYTE(p1);
-      *pd++ = BYTE(p1);
-      *pd++ = BYTE(p1);
-
-      *pd++ = BYTE(p2);
-      *pd++ = BYTE(p2);
-      *pd++ = BYTE(p2);
+      *pd++ = palette[p2][0];
+      *pd++ = palette[p2][1];
+      *pd++ = palette[p2][2];
 
       ps++;
     }
@@ -282,16 +360,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
           FillRect(drawDC, &rcClient, backgroundBrush);
 
           if (bmpRender) {
-            vram_to_bmp(pbmpRender, screen);
+            vram_to_bmp(pbmpRender, screen); // screen
             StretchDIBits(drawDC, rcView.left, rcView.top, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
-            vram_to_bmp(pbmpRender, vram[0]);
+            vram_to_bmp(pbmpRender, vram[2]); // background
             StretchDIBits(drawDC, rcView.left + (rcView.right - rcView.left) / 2, rcView.top, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
-            vram_to_bmp(pbmpRender, vram[1]);
+            vram_to_bmp(pbmpRender, vram[0]); // framebuffer 1
             StretchDIBits(drawDC, rcView.left, rcView.top + (rcView.bottom - rcView.top) / 2, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
-            vram_to_bmp(pbmpRender, vram[2]);
+            vram_to_bmp(pbmpRender, vram[1]); // framebuffer 2
             StretchDIBits(drawDC, rcView.left + (rcView.right - rcView.left) / 2, rcView.top + (rcView.bottom - rcView.top) / 2, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
           }
 

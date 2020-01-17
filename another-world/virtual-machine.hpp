@@ -4,6 +4,8 @@
 #include <map>
 #include <string>
 #include <stdint.h>
+#include <stdarg.h>
+
 
 #include "byte-killer.hpp"
 
@@ -17,9 +19,11 @@ namespace another_world {
   extern uint32_t read_uint32_bigendian(const void* p);
 
   extern bool (*read_file)(std::wstring filename, uint32_t offset, uint32_t length, char* buffer);
-  extern void (*debug)(std::string message);
+  extern void (*debug)(const char *fmt, ...);
+	extern void (*debug_log)(const char *fmt, ...);
   extern void (*update_screen)(uint8_t *buffer);
-	extern void (*tick_yield)(uint32_t ticks);
+	extern void (*set_palette)(uint16_t* palette);
+	extern void (*debug_yield)();
 
   extern uint8_t heap[HEAP_SIZE];
 
@@ -70,21 +74,59 @@ namespace another_world {
     Resource *background;
     Resource *characters;
 
-    uint8_t *active_vram = vram[0];
+    uint8_t *working_vram = vram[2];
+		uint8_t *visible_vram = vram[0];
 
     void init();
     void initialise_chapter(uint16_t id);
-    void tick();
+    void execute_threads();
 
     uint8_t fetch_byte(uint16_t* pc);
-		uint8_t fetch_byte(uint8_t* b, uint16_t* c);
+		uint8_t fetch_byte(uint8_t* b, uint32_t* c);
     uint16_t fetch_word(uint16_t* pc);
+		uint16_t fetch_word(uint8_t* b, uint32_t* c);
 
-		void draw_polygon(uint8_t color, Point p, uint8_t* buffer, uint16_t offset);
+		uint8_t* get_vram_from_id(uint8_t id);
+		void draw_shape(uint8_t color, Point pos, uint8_t zoom, uint8_t* buffer, uint32_t *offset);
+		void draw_polygon(uint8_t color, Point pos, uint8_t zoom, uint8_t* buffer, uint32_t *offset);
+		void draw_polygon_group(uint8_t color, Point pos, uint8_t zoom, uint8_t* buffer, uint32_t *offset);
+		void polygon(uint8_t* target, uint8_t color, Point* points, uint8_t point_count);
+		void point(uint8_t* target, uint8_t color, Point* point);
+
   };
 
   void load_resource_list();
   void load_needed_resources();
+
+	const std::string opcode_names[29] = {
+		"movi",   // 0x00   movi  d0, #1234
+		"mov",    // 0x01   mov   d0, d1
+		"add",    // 0x02   add   d0, d1
+		"addi",   // 0x03   addi  d0, #1234
+		"call",   // 0x04   call  #1234
+		"ret",    // 0x05   ret
+		"brk",    // 0x06   brk
+		"jmp",    // 0x07   jmp   #1234
+		"svec",   // 0x08   svec  #12, #1234
+		"djnz",   // 0x09   djnz  d0, #1234
+		"cjmp",   // 0x0a   cjmp  #12, d0, d1 or #1234, #1234
+		"pal",    // 0x0b   pal   #12, #12
+		"???",    // 0x0c   ???   #12, #12, #12
+		"setws",  // 0x0d   setws #12
+		"vclr",   // 0x0e   vclr  #12, #12
+		"vcpy",   // 0x0f   vcpy  #12, #12
+		"vshw",   // 0x10   vshw  #12
+		"kill",   // 0x11   kill
+		"text",   // 0x12   text  #1234, #12, #12, #12
+		"sub",    // 0x13   sub   d0, d1
+		"andi",   // 0x14   andi  d0, #1234
+		"ori",    // 0x15   ori   d0, #1234
+		"shli",   // 0x16   shli  d0, #1234 
+		"shri",   // 0x17   shri  d0, #1234 
+		"snd",    // 0x18   snd   #1234, #12, #12, #12
+		"load",   // 0x19   load  #1234
+		"music"   // 0x1a   music #1234, #1234, #12
+	};
 
 	const std::map<uint16_t, std::string> string_table = {
 	{ 0x001, "P E A N U T  3000" },
