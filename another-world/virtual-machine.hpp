@@ -28,11 +28,12 @@ namespace another_world {
   extern uint8_t heap[HEAP_SIZE];
 
 	// three buffers for 320 x 200 (4 bits per pixel)
+	extern uint8_t vram0[320 * 200 / 2];
 	extern uint8_t vram1[320 * 200 / 2];
 	extern uint8_t vram2[320 * 200 / 2];
 	extern uint8_t vram3[320 * 200 / 2];
 
-	extern uint8_t* vram[3];
+	extern uint8_t* vram[4];
 
 	struct Point {
 		int16_t x;
@@ -64,8 +65,11 @@ namespace another_world {
   extern std::vector<Resource*> resources;
 
   struct VirtualMachine {
+	 uint32_t ticks = 0;
+
     int16_t   registers[REGISTER_COUNT];
     uint16_t  program_counter[THREAD_COUNT];
+		bool			paused_thread[THREAD_COUNT];
     uint8_t   chapter_id;
     std::vector<uint16_t> call_stack;
 
@@ -87,9 +91,9 @@ namespace another_world {
 		uint16_t fetch_word(uint8_t* b, uint32_t* c);
 
 		uint8_t* get_vram_from_id(uint8_t id);
-		void draw_shape(uint8_t color, Point pos, uint8_t zoom, uint8_t* buffer, uint32_t *offset);
-		void draw_polygon(uint8_t color, Point pos, uint8_t zoom, uint8_t* buffer, uint32_t *offset);
-		void draw_polygon_group(uint8_t color, Point pos, uint8_t zoom, uint8_t* buffer, uint32_t *offset);
+		void draw_shape(uint8_t color, Point pos, int16_t zoom, uint8_t* buffer, uint32_t *offset);
+		void draw_shape_group(uint8_t color, Point pos, int16_t zoom, uint8_t* buffer, uint32_t* offset);
+		void draw_polygon(uint8_t color, Point pos, int16_t zoom, uint8_t* buffer, uint32_t *offset);
 		void polygon(uint8_t* target, uint8_t color, Point* points, uint8_t point_count);
 		void point(uint8_t* target, uint8_t color, Point* point);
 

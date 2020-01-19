@@ -3,6 +3,7 @@
 
 #include <chrono>
 
+#include "windowsx.h"
 #include "framework.h"
 #include "AnotherWorld.h"
 
@@ -23,6 +24,7 @@ BITMAPINFO bmpInfo;
 LPBYTE pbmpRender;
 HBITMAP bmpRender;
 RECT rcView;
+HFONT hFont;
 uint8_t screen[320 * 200 / 2];
 uint8_t palette[16][3];
 uint8_t pixelSize;
@@ -80,6 +82,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     SetRect(&rcSurface, 0, 0, 320, 200);
 
+    hFont = CreateFontA(14, 0, 0, 0, 700, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FIXED_PITCH, "Consolas");        
+
     // Perform application initialization:
     if (!InitInstance (hInstance, nCmdShow))
     {
@@ -91,8 +95,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     MSG msg;
     
     bmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmpInfo.bmiHeader.biWidth = rcSurface.right;
-    bmpInfo.bmiHeader.biHeight = rcSurface.bottom;
+    bmpInfo.bmiHeader.biWidth = 320;
+    bmpInfo.bmiHeader.biHeight = 200;
     bmpInfo.bmiHeader.biPlanes = 1;
     bmpInfo.bmiHeader.biBitCount = 24;
     bmpInfo.bmiHeader.biCompression = BI_RGB;
@@ -113,8 +117,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     another_world::debug_log = [](const char *fmt, ...) {
       static bool first = true; // if first run then open the file and truncate
+      return;
       va_list args;
-
       std::wstring filename = L"vm.log";
       va_start(args, fmt);
       std::string line = string_format(fmt, args) + "\n";
@@ -161,8 +165,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     another_world::debug_yield = []() {
       InvalidateRect(hWnd, NULL, FALSE);
       UpdateWindow(hWnd);
-
-      Sleep(10);
+/*
+      if(vm.ticks > 11800) {
+        Sleep(100);
+      }*/
     };
 
     load_resource_list();
@@ -192,7 +198,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       uint32_t clock = now();
 
       // aim for 25 frames per second
-      if(clock - last_frame_clock > 20) {
+      uint16_t pause_ms = 20 * vm.registers[0xff];
+     // pause_ms = 0;
+      if(clock - last_frame_clock > pause_ms) {
         uint32_t frame_start = now();
         debug("-------------------------------");
         vm.execute_threads();
@@ -263,19 +271,21 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 }
 
 void vram_to_bmp(LPBYTE pd, uint8_t* ps) {
-  for (uint16_t y = 0; y < 320; y++) {
-    for (uint16_t x = 0; x < 200; x += 2) {
+  for (uint16_t y = 0; y < 200; y++) {
+    uint8_t* ppd = &pd[(199 - y) * 320 * 3];
+
+    for (uint16_t x = 0; x < 320; x += 2) {
       uint8_t p = *ps;
       uint8_t p1 = p >> 4;
       uint8_t p2 = p & 0x0f;
 
-      *pd++ = palette[p1][2];
-      *pd++ = palette[p1][1];
-      *pd++ = palette[p1][0];
+      *ppd++ = palette[p1][2];
+      *ppd++ = palette[p1][1];
+      *ppd++ = palette[p1][0];
 
-      *pd++ = palette[p2][2];
-      *pd++ = palette[p2][1];
-      *pd++ = palette[p2][0];
+      *ppd++ = palette[p2][2];
+      *ppd++ = palette[p2][1];
+      *ppd++ = palette[p2][0];
 
       ps++;
     }
@@ -338,25 +348,47 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
           HBITMAP bmpDraw = CreateCompatibleBitmap(hdc, rcClient.right - rcClient.left, rcClient.bottom - rcClient.top);
           HBITMAP hbmOld = (HBITMAP)SelectObject(drawDC, bmpDraw);
 
+          
 
           HBRUSH backgroundBrush = CreateSolidBrush(RGB(30, 40, 50));
           FillRect(drawDC, &rcClient, backgroundBrush);
 
           if (bmpRender) {
-            vram_to_bmp(pbmpRender, vram[2]); // screen
-            StretchDIBits(drawDC, rcView.left, rcView.top, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
+            uint16_t thumb_width = (rcView.right - rcView.left) / 4;
+            uint16_t thumb_height = (rcView.bottom - rcView.top) / 4;
+
+            RECT rcThumb;
+            SetRect(&rcThumb, rcView.left, rcView.bottom - thumb_height, rcView.left + thumb_width, rcView.bottom);
 
             vram_to_bmp(pbmpRender, screen); // background
-            StretchDIBits(drawDC, rcView.left + (rcView.right - rcView.left) / 2, rcView.top, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
+            StretchDIBits(drawDC, rcView.left, rcView.top, rcView.right - rcView.left, rcView.bottom - rcView.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
-            vram_to_bmp(pbmpRender, vram[0]); // framebuffer 1
-            StretchDIBits(drawDC, rcView.left, rcView.top + (rcView.bottom - rcView.top) / 2, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
+            vram_to_bmp(pbmpRender, vram0); // screen
+            StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
-            vram_to_bmp(pbmpRender, vram[1]); // framebuffer 2
-            StretchDIBits(drawDC, rcView.left + (rcView.right - rcView.left) / 2, rcView.top + (rcView.bottom - rcView.top) / 2, (rcView.right - rcView.left) / 2, (rcView.bottom - rcView.top) / 2, 0, rcSurface.bottom + 1, rcSurface.right, -rcSurface.bottom, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
+            rcThumb.left += thumb_width; rcThumb.right += thumb_width;
+
+            vram_to_bmp(pbmpRender, vram1); // screen
+            StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
+
+            rcThumb.left += thumb_width; rcThumb.right += thumb_width;
+
+            vram_to_bmp(pbmpRender, vram2); // screen
+            StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
+
+            rcThumb.left += thumb_width; rcThumb.right += thumb_width;
+
+            vram_to_bmp(pbmpRender, vram3); // screen
+            StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
+
           }
 
           BitBlt(hdc, rcClient.left, rcClient.top, rcClient.right - rcClient.left, rcClient.bottom - rcClient.top, drawDC, 0, 0, SRCCOPY);
+
+          std::wstring tick_count = std::to_wstring(vm.ticks);
+
+          SelectFont(hdc, hFont);
+          DrawText(hdc, tick_count.c_str(), -1, &rcClient, DT_TOP | DT_LEFT);
 
           SelectObject(drawDC, hbmOld);
           DeleteDC(drawDC);
