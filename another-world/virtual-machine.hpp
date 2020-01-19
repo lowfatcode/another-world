@@ -18,7 +18,7 @@ namespace another_world {
   extern uint16_t read_uint16_bigendian(const void* p);
   extern uint32_t read_uint32_bigendian(const void* p);
 
-  extern bool (*read_file)(std::wstring filename, uint32_t offset, uint32_t length, char* buffer);
+  extern bool (*read_file)(std::string filename, uint32_t offset, uint32_t length, char* buffer);
   extern void (*debug)(const char *fmt, ...);
 	extern void (*debug_log)(const char *fmt, ...);
   extern void (*update_screen)(uint8_t *buffer);

@@ -8,6 +8,8 @@
 #include <assert.h>
 #include <string.h>
 #include <algorithm>
+#include <ctime>
+
 
 #include "virtual-machine.hpp"
 
@@ -31,7 +33,7 @@ namespace another_world {
     return (b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
   }
 
-  bool (*read_file)(std::wstring filename, uint32_t offset, uint32_t length, char* buffer) = nullptr;
+  bool (*read_file)(std::string filename, uint32_t offset, uint32_t length, char* buffer) = nullptr;
   void (*debug)(const char *fmt, ...) = nullptr;
   void (*debug_log)(const char *fmt, ...) = nullptr;
   void (*update_screen)(uint8_t* buffer) = nullptr;
@@ -88,7 +90,7 @@ namespace another_world {
     uint8_t memlist[2940];
     uint8_t *p = memlist;    
 
-    read_file(L"memlist.bin", 0, 2940, (char*)memlist);
+    read_file("memlist.bin", 0, 2940, (char*)memlist);
 
     while(p[0] != Resource::State::END_OF_MEMLIST) {
       Resource *resource = new Resource();
@@ -136,8 +138,47 @@ namespace another_world {
         //debug("Loading resource of type " + std::to_string(resource->type) + " at offset " + std::to_string(heap_offset));
         resource->load(destination);      
 
+        // TODO: if the resource was an image then it's encoded as 4 bitplanes a la mode 9
+        // we need to shuffle the pixels around to get it into our buffer format
+        if (resource->type == Resource::Type::IMAGE) {
+          uint8_t temp[320 * 200 / 2];
+          memcpy(temp, destination, 320 * 200 / 2);
+          uint8_t* p = destination;
+          for (uint16_t y = 0; y < 200; y++) {
+            for (uint16_t x = 0; x < 320; x += 8) {
+              uint8_t b1 = temp[y * 40 + x / 8 + 0];
+              uint8_t b2 = temp[y * 40 + x / 8 + 8000];
+              uint8_t b3 = temp[y * 40 + x / 8 + 16000];
+              uint8_t b4 = temp[y * 40 + x / 8 + 24000];
+
+              for (uint8_t i = 0; i < 4; i++) {
+                uint8_t v1 = (b1 & 0b10000000) >> 0;
+                uint8_t v2 = (b2 & 0b10000000) >> 1;
+                uint8_t v3 = (b3 & 0b10000000) >> 2;
+                uint8_t v4 = (b4 & 0b10000000) >> 3;
+
+                b1 <<= 1;
+                b2 <<= 1;
+                b3 <<= 1;
+                b4 <<= 1;
+
+                uint8_t v5 = (b1 & 0b10000000) >> 4;
+                uint8_t v6 = (b2 & 0b10000000) >> 5;
+                uint8_t v7 = (b3 & 0b10000000) >> 6;
+                uint8_t v8 = (b4 & 0b10000000) >> 7;
+
+                b1 <<= 1;
+                b2 <<= 1;
+                b3 <<= 1;
+                b4 <<= 1;
+
+                *p++ = v1 | v2 | v3 | v4 | v5 | v6 | v7 | v8;
+              }
+            }
+          }
+        }
+
         if(resource->type == Resource::Type::IMAGE) {
-          /* copy image to backbuffer */
           resource->state = Resource::State::NOT_NEEDED;
         } else {
           resource->state = Resource::State::LOADED;
@@ -147,11 +188,11 @@ namespace another_world {
   }
 
   bool Resource::load(uint8_t *destination) {
-    static std::wstring hex[16] = {L"0", L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8", L"9", L"a", L"b", L"c", L"d", L"e", L"f"};  
+    static std::string hex[16] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"};  
 
     // TODO: move file access out of here by requiring a basic set 
     // of system calls to be provided
-    std::wstring bank_filename = L"bank0" + hex[this->bank_id];
+    std::string bank_filename = "bank0" + hex[this->bank_id];
     read_file(bank_filename, this->bank_offset, this->packed_size, (char*)destination);
 
     if(this->packed_size != this->size) {
@@ -182,7 +223,14 @@ namespace another_world {
   void VirtualMachine::init() {
     memset(registers, 0, REGISTER_COUNT * sizeof(int16_t));
     registers[0x54] = 0x81; // TODO: erm?
-    registers[REG_RANDOM_SEED] = rand();
+
+    // TODO: some special register values that need setting
+    registers[0xBC] = 0x10;
+    registers[0xC6] = 0x80;
+    registers[0xF2] = 4000;
+    registers[0xDC] = 33;
+    registers[0xE4] = 20;
+    registers[REG_RANDOM_SEED] = 2322; // selected at random by committee
   }
 
   void VirtualMachine::initialise_chapter(uint16_t id) {
@@ -516,7 +564,7 @@ namespace another_world {
 
     // step through each thread and execute the active ones
     for(uint8_t i = 0; i < THREAD_COUNT; i++) {
-      if(program_counter[i] != THREAD_INACTIVE && !paused_thread[i]) {
+      if(program_counter[i] != THREAD_INACTIVE && program_counter[i] != 0xfffe && !paused_thread[i]) {
         uint16_t *pc = &program_counter[i];
 
         bool next_thread = false;
@@ -543,7 +591,7 @@ namespace another_world {
           // 01xxxxxx = polygon opcode long format (translated from Eric Chahi's "different format de donnees pour spr.l")
           // 1xxxxxxx = polygon opcode short format (high part of address in bits 0-6)
 
-          if (ticks == 11849) {
+          if (ticks == 48) {
               uint8_t a = 0;
           }
 
@@ -638,7 +686,7 @@ namespace another_world {
               // Fabien Sanglard has this special case change the source of
               // polygon data to "SegVideo2" which I think is meant to be the
               // character data, anyway, let's try that...
-              //polygon_data = characters->data;
+              polygon_data = characters->data;
 
      //         assert(false); // i don't think we should end up here...
             }
@@ -830,18 +878,22 @@ namespace another_world {
                 if (type == 0) {
                   // unlock
                   // program_counter[thread_id] = ??
-                  new_paused_threads[thread_id] = THREAD_UNLOCK;
+                  paused_thread[thread_id] = THREAD_UNLOCK;
                 }
                 if (type == 1) {
                   // lock 
                   // program_counter[thread_id] = ??
-                  new_paused_threads[thread_id] = THREAD_LOCK;
+                  paused_thread[thread_id] = THREAD_LOCK;
                 }
                 if (type == 2) {
-                  new_program_counter[thread_id] = THREAD_INACTIVE;
+                  // TODO : No idea!!
+                  program_counter[thread_id] = 0xfffe;
                 }
               }
-
+              /*
+              if (type == 2) {
+                new_program_counter[0] = 0;
+              }*/
               /*
               uint8_t first = fetch_byte(pc);
               uint8_t last = fetch_byte(pc);
@@ -916,26 +968,56 @@ namespace another_world {
             case 0x0f: {
               // vcpy   #12, #12
               // copy contents of one backbuffer into another
+
               uint8_t src_id = fetch_byte(pc);
               uint8_t dest_id = fetch_byte(pc);
 
               if (src_id >= 0xFE || ((src_id &= ~0x40) & 0x80) == 0) {
-                
+
               }
               else {
-                assert(false); // TODO: vscroll?
+               // assert(false); // TODO: vscroll?
               }
 
-              debug("Copy buffer %d to %d", src_id, dest_id);
-              //src_id &= ~0x40;
-              uint8_t *s = get_vram_from_id(src_id);
-              uint8_t *d = get_vram_from_id(dest_id);
 
-              if(s && d) {
+              debug("Copy buffer %d to %d with vscroll %d", src_id, dest_id, registers[0xF9]);
+              //src_id &= ~0x40;
+              uint8_t* s = get_vram_from_id(src_id);
+              uint8_t* d = get_vram_from_id(dest_id);
+
+              if (s && d) {
                 // TODO: why would we ever be given an invalid screen id?
                 // that doesn't seem right...
                 memcpy(d, s, 320 * 200 / 2);
               }
+
+              /*
+              uint8_t src_id = fetch_byte(pc);
+              uint8_t dest_id = fetch_byte(pc);
+
+              debug("Copy buffer %d to %d", src_id, dest_id);
+
+              //src_id &= ~0x40;
+              uint8_t* s = get_vram_from_id(src_id);
+              uint8_t* d = get_vram_from_id(dest_id);
+
+           
+              // TODO: why would we ever be given an invalid screen id?
+              // that doesn't seem right...
+              if (s && d) {
+                int16_t v_scroll = registers[0xF9];
+                uint16_t h = 200;
+
+                if (v_scroll != 0) {
+                  uint8_t a = 0;
+                }
+                h -= abs(v_scroll);
+                s -= v_scroll < 0 ? (v_scroll * 160) : 0;
+                d += v_scroll > 0 ? (v_scroll * 160) : 0;
+
+                memcpy(d, s, 320 * h / 2);
+              }*/
+              
               
               debug_yield();
               // TODO: this should support vertical scrolling by looking the
@@ -1114,6 +1196,7 @@ namespace another_world {
     for (uint8_t i = 0; i < THREAD_COUNT; i++) {
       if (new_program_counter[i] == 0xfffe) {
         program_counter[i] = THREAD_INACTIVE;
+        new_program_counter[i] = THREAD_INACTIVE;
       } else {
         if (new_program_counter[i] != NO_UPDATE) {
           program_counter[i] = new_program_counter[i];

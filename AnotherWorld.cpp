@@ -29,6 +29,7 @@ uint8_t screen[320 * 200 / 2];
 uint8_t palette[16][3];
 uint8_t pixelSize;
 std::chrono::steady_clock::time_point start;
+uint8_t keys;
 
 uint32_t now() {
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
@@ -105,9 +106,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     
 
-    another_world::read_file = [](std::wstring filename, uint32_t offset, uint32_t length, char* buffer) {     
-      filename = L"c:\\another-world-data\\" + filename;
-      HANDLE fh = CreateFile(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);      
+    another_world::read_file = [](std::string filename, uint32_t offset, uint32_t length, char* buffer) {     
+      filename = "c:\\another-world-data\\" + filename;
+      std::wstring wfilename(filename.begin(), filename.end());
+      HANDLE fh = CreateFile(wfilename.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
       SetFilePointer(fh, offset, NULL, FILE_BEGIN);
       DWORD bytes_read = NULL;
       BOOL result = ReadFile(fh, buffer, length, &bytes_read, NULL);
@@ -165,17 +167,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     another_world::debug_yield = []() {
       InvalidateRect(hWnd, NULL, FALSE);
       UpdateWindow(hWnd);
-/*
-      if(vm.ticks > 11800) {
-        Sleep(100);
-      }*/
+
     };
 
     load_resource_list();
     vm.init();
 
     // initialise the first chapter
-    vm.initialise_chapter(16001);
+    vm.initialise_chapter(16005);
     
     start = std::chrono::steady_clock::now();
 
@@ -203,6 +202,39 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       if(clock - last_frame_clock > pause_ms) {
         uint32_t frame_start = now();
         debug("-------------------------------");
+
+
+        debug("Key state %d", keys);
+        
+        vm.registers[0xE5] = 0;
+        vm.registers[0xFB] = 0;
+        vm.registers[0xFC] = 0;
+
+
+        if (keys & 0b00001000) {
+          vm.registers[0xE5] = -1;
+          vm.registers[0xFB] = -1;
+        }
+
+        if (keys & 0b00000100) {
+          vm.registers[0xE5] = 1;
+          vm.registers[0xFB] = 1;
+        }
+
+        if (keys & 0b00000010) {
+          vm.registers[0xFC] = -1;
+        }
+
+        if (keys & 0b00000001) {
+          vm.registers[0xFC] = 1;
+        }
+
+
+        vm.registers[0xFD] = keys;
+        vm.registers[0xFA] = keys & 0b10000000 ? 1 : 0;
+        vm.registers[0xFE] = keys;
+
+        
         vm.execute_threads();
         //debug("Frame took %dms", now() - frame_start);
         last_frame_clock = clock;
@@ -291,6 +323,9 @@ void vram_to_bmp(LPBYTE pd, uint8_t* ps) {
     }
   }
 }
+
+
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -335,6 +370,56 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       SetRect(&rcView, 0, 0, rcSurface.right * pixelSize, rcSurface.bottom * pixelSize);
       OffsetRect(&rcView, (width - rcView.right) / 2, (height - rcView.bottom) / 2);
     }break;
+    case WM_KEYDOWN:
+    {
+      switch (wParam) {
+        case VK_UP: {
+          keys |= 0b00001000;
+          break;
+        }
+        case VK_DOWN: {
+          keys |= 0b00000100;
+          break;
+        }
+        case VK_LEFT: {
+          keys |= 0b00000010;
+          break;
+        }
+        case VK_RIGHT: {
+          keys |= 0b00000001;
+          break;
+        }
+        case VK_SPACE: {
+          keys |= 0b10000000;
+          break;
+        }
+      }
+    }break;
+    case WM_KEYUP:
+    {
+      switch (wParam) {
+        case VK_UP: {
+          keys &= ~0b00001000;
+          break;
+        }
+        case VK_DOWN: {
+          keys &= ~0b00000100;
+          break;
+        }
+        case VK_LEFT: {
+          keys &= ~0b00000010;
+          break;
+        }
+        case VK_RIGHT: {
+          keys &= ~0b00000001;
+          break;
+        }
+        case VK_SPACE: {
+          keys &= ~0b10000000;
+          break;
+        }
+      }
+    }break;
     case WM_PAINT:
         {
           PAINTSTRUCT ps;
@@ -359,10 +444,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             RECT rcThumb;
             SetRect(&rcThumb, rcView.left, rcView.bottom - thumb_height, rcView.left + thumb_width, rcView.bottom);
+            InflateRect(&rcThumb, -10, -10);
 
             vram_to_bmp(pbmpRender, screen); // background
             StretchDIBits(drawDC, rcView.left, rcView.top, rcView.right - rcView.left, rcView.bottom - rcView.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
-
+            
             vram_to_bmp(pbmpRender, vram0); // screen
             StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
@@ -380,7 +466,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             vram_to_bmp(pbmpRender, vram3); // screen
             StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
-
+            
           }
 
           BitBlt(hdc, rcClient.left, rcClient.top, rcClient.right - rcClient.left, rcClient.bottom - rcClient.top, drawDC, 0, 0, SRCCOPY);
