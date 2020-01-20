@@ -35,202 +35,41 @@ namespace another_world {
 
   bool (*read_file)(std::string filename, uint32_t offset, uint32_t length, char* buffer) = nullptr;
   void (*debug)(const char *fmt, ...) = nullptr;
-  void (*debug_log)(const char *fmt, ...) = nullptr;
+  void (*debug_display_update)() = nullptr;
   void (*update_screen)(uint8_t* buffer) = nullptr;
   void (*set_palette)(uint16_t* palette) = nullptr;
-  void (*debug_yield)() = nullptr;
 
-  std::vector<Resource *> resources;
-
-  uint8_t heap[HEAP_SIZE];
-  uint32_t heap_offset = 0;
   
   uint8_t vram0[320 * 200 / 2];
   uint8_t vram1[320 * 200 / 2];
   uint8_t vram2[320 * 200 / 2];
   uint8_t vram3[320 * 200 / 2];
 
+  Input input;
+
   uint8_t* vram[4] = {
-    vram0,  // background for masking
+    vram0,  // background 1 (also used for clone drawing operations)
     vram1,  // framebuffer 1
     vram2,  // framebuffer 2
-    vram3   // background
+    vram3   // background 2
   };
-
-
-  // each chapter of the game has a set of fixed resources related to it.
-  // these include the vm code, video 1, video 2, and palette
-  struct ChapterResource {
-    uint8_t palette;
-    uint8_t code;
-    uint8_t background;
-    uint8_t characters;
-  };
-
-  ChapterResource chapter_resources[10] = {
-    {0x14, 0x15, 0x16, 0x00},
-    {0x17, 0x18, 0x19, 0x00},
-    {0x1a, 0x1b, 0x1c, 0x11},
-    {0x1d, 0x1e, 0x1f, 0x11},
-    {0x20, 0x21, 0x22, 0x11},
-    {0x23, 0x24, 0x25, 0x00},
-    {0x26, 0x27, 0x28, 0x11},
-    {0x29, 0x2a, 0x2b, 0x11},
-    {0x7d, 0x7e, 0x7f, 0x00},
-    {0x7d, 0x7e, 0x7f, 0x00}
-  };
-
-  // load the resource definitions from MEMLIST.BIN
-  // you must provide a pointer to a buffer than contains the
-  // file contents
-  void load_resource_list() {
-
-    // TODO: move file access out of here by requiring a basic set 
-    // of system calls to be provided
-    uint8_t memlist[2940];
-    uint8_t *p = memlist;    
-
-    read_file("memlist.bin", 0, 2940, (char*)memlist);
-
-    while(p[0] != Resource::State::END_OF_MEMLIST) {
-      Resource *resource = new Resource();
-
-      // each memlist entry (resource) contains 20 bytes:
-      //
-      //  0     : state
-      //  1     : type
-      //  2 -  6: unknown (always zero)
-      //  7     : bank id
-      //  8 - 11: bank data start offset
-      // 12 - 15: packed size
-      // 16 - 19: unpacked size
-
-      resource->state       = (Resource::State)p[0];
-      resource->type        = (Resource::Type)p[1];
-      resource->bank_id     = p[7];
-      resource->bank_offset = read_uint32_bigendian(p + 8);
-      resource->packed_size = read_uint32_bigendian(p + 12);
-      resource->size        = read_uint32_bigendian(p + 16);
-
-      resources.push_back(resource);
-
-      p += 20;
-    }
-  }
-
-  // loads all resources that are currently in the NEEDS_LOADING state
-  void load_needed_resources() {
-    for(auto resource : resources) {
-      if(resource->state == Resource::State::NEEDS_LOADING) { 
-
-        if (resource->type == Resource::Type::SOUND || resource->type == Resource::Type::MUSIC) {
-          continue;
-        }
-
-        uint8_t *destination;
-        if(resource->type == Resource::Type::IMAGE) {
-          destination = vram[0];
-        } else {
-          destination = heap + heap_offset;
-          heap_offset += resource->size;
-        }
-
-        //debug("Loading resource of type " + std::to_string(resource->type) + " at offset " + std::to_string(heap_offset));
-        resource->load(destination);      
-
-        // TODO: if the resource was an image then it's encoded as 4 bitplanes a la mode 9
-        // we need to shuffle the pixels around to get it into our buffer format
-        if (resource->type == Resource::Type::IMAGE) {
-          uint8_t temp[320 * 200 / 2];
-          memcpy(temp, destination, 320 * 200 / 2);
-          uint8_t* p = destination;
-          for (uint16_t y = 0; y < 200; y++) {
-            for (uint16_t x = 0; x < 320; x += 8) {
-              uint8_t b1 = temp[y * 40 + x / 8 + 0];
-              uint8_t b2 = temp[y * 40 + x / 8 + 8000];
-              uint8_t b3 = temp[y * 40 + x / 8 + 16000];
-              uint8_t b4 = temp[y * 40 + x / 8 + 24000];
-
-              for (uint8_t i = 0; i < 4; i++) {
-                uint8_t v1 = (b1 & 0b10000000) >> 0;
-                uint8_t v2 = (b2 & 0b10000000) >> 1;
-                uint8_t v3 = (b3 & 0b10000000) >> 2;
-                uint8_t v4 = (b4 & 0b10000000) >> 3;
-
-                b1 <<= 1;
-                b2 <<= 1;
-                b3 <<= 1;
-                b4 <<= 1;
-
-                uint8_t v5 = (b1 & 0b10000000) >> 4;
-                uint8_t v6 = (b2 & 0b10000000) >> 5;
-                uint8_t v7 = (b3 & 0b10000000) >> 6;
-                uint8_t v8 = (b4 & 0b10000000) >> 7;
-
-                b1 <<= 1;
-                b2 <<= 1;
-                b3 <<= 1;
-                b4 <<= 1;
-
-                *p++ = v1 | v2 | v3 | v4 | v5 | v6 | v7 | v8;
-              }
-            }
-          }
-        }
-
-        if(resource->type == Resource::Type::IMAGE) {
-          resource->state = Resource::State::NOT_NEEDED;
-        } else {
-          resource->state = Resource::State::LOADED;
-        }
-      }
-    }
-  }
-
-  bool Resource::load(uint8_t *destination) {
-    static std::string hex[16] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"};  
-
-    // TODO: move file access out of here by requiring a basic set 
-    // of system calls to be provided
-    std::string bank_filename = "bank0" + hex[this->bank_id];
-    read_file(bank_filename, this->bank_offset, this->packed_size, (char*)destination);
-
-    if(this->packed_size != this->size) {
-      ByteKiller bk;    
-      bool success = bk.unpack(destination, this->packed_size);
-      if (success) {
-        debug("- Unpacked successfully");
-      }
-      else {
-        debug("- Unpacking failed");
-      }
-
-    }
-
-    this->data = destination;
-    /*
-    if (this->type == Resource::Type::BYTECODE) {
-      debug("DUMP SCRIPT");
-      for (uint32_t i = 0; i < this->size; i++) {
-        debug(std::to_string(this->data[i]));
-      }
-      debug("END DUMP SCRIPT");
-    }*/
-
-    return true;
-  }
 
   void VirtualMachine::init() {
-    memset(registers, 0, REGISTER_COUNT * sizeof(int16_t));
-    registers[0x54] = 0x81; // TODO: erm?
+    init_resources();
 
-    // TODO: some special register values that need setting
+    memset(registers, 0, REGISTER_COUNT * sizeof(int16_t));
+
+    // TODO: some special register values that need setting,
+    // perhaps one day we'll have a dig around and figure out why...
+    registers[0x54] = 0x81;
     registers[0xBC] = 0x10;
     registers[0xC6] = 0x80;
     registers[0xF2] = 4000;
     registers[0xDC] = 33;
     registers[0xE4] = 20;
-    registers[REG_RANDOM_SEED] = 2322; // selected at random by committee
+
+    // number selected by committee, guaranteed random
+    registers[REG_RANDOM_SEED] = 2322; 
   }
 
   void VirtualMachine::initialise_chapter(uint16_t id) {
@@ -238,7 +77,7 @@ namespace another_world {
 	  mixer->stopAll();*/
 
     // reset the heap and resource states
-    heap_offset = 0;
+    
     for(auto resource : resources) {
       resource->state = Resource::State::NOT_NEEDED;
     }
@@ -342,7 +181,7 @@ namespace another_world {
   void VirtualMachine::polygon(uint8_t *target, uint8_t color, Point *points, uint8_t point_count) {
     static int32_t nodes[256]; // maximum allowed number of nodes per scanline for polygon rendering    
 
-    Rect clip = { 0, 0, 319, 199 };
+    Rect clip = { 0, 0, 320, 200 };
     int16_t miny = points[0].y, maxy = points[0].y;
 
     // copy the colour value into the high and low nibbles making
@@ -392,7 +231,9 @@ namespace another_world {
       }      
     }
 
-    debug_yield();
+    if (debug_display_update) {
+      debug_display_update();
+    }    
   }
 
   void VirtualMachine::draw_shape(uint8_t color, Point pos, int16_t zoom, uint8_t *buffer, uint32_t *offset) {
@@ -531,8 +372,53 @@ namespace another_world {
     return nullptr;
   }
 
+  void VirtualMachine::process_input() {
+    uint8_t input_mask = 0;
+
+    registers[0xE5] = 0;
+    registers[0xFB] = 0;
+    registers[0xFC] = 0;
+    registers[0xFA] = 0;
+
+    if (input.up && !input.down) {
+      input_mask |= 0b00001000;
+      // TODO: why both?
+      registers[0xE5] = -1;
+      registers[0xFB] = -1;
+    }
+
+    if (input.down && !input.up) {
+      input_mask |= 0b00000100;
+      // TODO: why both?
+      registers[0xE5] = 1;
+      registers[0xFB] = 1;
+    }
+
+    if (input.left && !input.right) {
+      input_mask |= 0b00000010;
+      registers[0xFC] = -1;
+    }
+
+    if (input.right && !input.left) {
+      input_mask |= 0b00000001;
+      registers[0xFC] = 1;
+    }
+
+    if (input.action) {
+      input_mask |= 0b10000000;
+      registers[0xFA] = 1;
+    }
+ 
+    // TODO: why both?
+    registers[0xFD] = input_mask;
+    registers[0xFE] = input_mask;
+  }
+
   void VirtualMachine::execute_threads() {
-    debug_log("--- execute threads ---");
+    if (debug) {
+      debug("--- execute threads ---");
+    }
+    
     // TODO: switch part if needed (can't this be done in the op code processing?)
   
         //  //Check if a part switch has been requested.
@@ -547,6 +433,8 @@ namespace another_world {
 
     // ensure the call stack is empty before starting
     call_stack.clear();
+
+    process_input();
 
     // during thread execution the svec opcode allows a thread
     // to be given a new program counter for the next cycle of
@@ -582,7 +470,9 @@ namespace another_world {
             opcode_name = "plys";
           }
           
-          debug_log("%6i)  %2i [%05u] > %02x:%-6s", ticks, i, *(pc) - 1, opcode, opcode_name.c_str());
+          if(debug) {
+            debug("%6i)  %2i [%05u] > %02x:%-6s", ticks, i, *(pc)-1, opcode, opcode_name.c_str());
+          }          
 
           // opcodes come in three different flavours depending on the status
           // of the two highest bits
@@ -868,55 +758,29 @@ namespace another_world {
               // "type" of action (unlock, lock, clear)
               // it suggests that this opcode should affect a range of
               // threads, perhaps updating their state in bulk?
-            //  assert(false); // not sure this ever gets called
 
               uint8_t first = fetch_byte(pc);
               uint8_t last = fetch_byte(pc);
               uint8_t type = fetch_byte(pc);
 
               for (uint8_t thread_id = first; thread_id <= last; thread_id++) {
-                if (type == 0) {
-                  // unlock
-                  // program_counter[thread_id] = ??
-                  paused_thread[thread_id] = THREAD_UNLOCK;
-                }
-                if (type == 1) {
-                  // lock 
-                  // program_counter[thread_id] = ??
-                  paused_thread[thread_id] = THREAD_LOCK;
-                }
-                if (type == 2) {
-                  // TODO : No idea!!
-                  program_counter[thread_id] = 0xfffe;
+                if(program_counter[thread_id] != THREAD_INACTIVE) {
+                  if (type == 0) {
+                    // unlock
+                    // program_counter[thread_id] = ??
+                    paused_thread[thread_id] = THREAD_UNLOCK;
+                  }
+                  if (type == 1) {
+                    // lock 
+                    // program_counter[thread_id] = ??
+                    paused_thread[thread_id] = THREAD_LOCK;
+                  }
+                  if (type == 2) {
+                    // TODO : No idea!!
+                    new_program_counter[thread_id] = 0xfffe;
+                  }
                 }
               }
-              /*
-              if (type == 2) {
-                new_program_counter[0] = 0;
-              }*/
-              /*
-              uint8_t first = fetch_byte(pc);
-              uint8_t last = fetch_byte(pc);
-              uint8_t type = fetch_byte(pc);
-
-              for (uint8_t thread_id = first; thread_id <= last; thread_id++) {
-                if (type == 0) {
-                  // unlock
-                  // program_counter[thread_id] = ??
-                  program_counter[thread_id] = type;
-                }
-                if (type == 1) {
-                  // lock 
-                  // program_counter[thread_id] = ??
-                  program_counter[thread_id] = type;
-                }
-                if (type == 2) {
-                  // clean - i think this means reset any new program counters
-                  // assigned to the threads in this range
-                  new_program_counter[thread_id] = 0xfffe;
-                }
-                
-              }*/
               break;
             }
 
@@ -927,8 +791,6 @@ namespace another_world {
               // set the working screen for drawing operations
               uint8_t id = fetch_byte(pc);
               uint8_t *b = get_vram_from_id(id);
-
-              debug("Set working buffer %d", id);
 
               if(b) {
                 // TODO: why would we ever be given an invalid screen id?
@@ -949,8 +811,6 @@ namespace another_world {
               uint8_t id = fetch_byte(pc);
               uint8_t* d = get_vram_from_id(id);              
 
-              debug("Clear buffer %d", id);
-
               uint8_t color = fetch_byte(pc);
               color |= color << 4;
 
@@ -960,7 +820,9 @@ namespace another_world {
                 memset(d, color, 320 * 200 / 2);
               }
 
-              debug_yield();
+              if (debug_display_update) {
+                debug_display_update();
+              }
 
               break;
             }
@@ -980,7 +842,6 @@ namespace another_world {
               }
 
 
-              debug("Copy buffer %d to %d with vscroll %d", src_id, dest_id, registers[0xF9]);
               //src_id &= ~0x40;
               uint8_t* s = get_vram_from_id(src_id);
               uint8_t* d = get_vram_from_id(dest_id);
@@ -1019,7 +880,10 @@ namespace another_world {
               }*/
               
               
-              debug_yield();
+              if (debug_display_update) {
+                debug_display_update();
+              }
+
               // TODO: this should support vertical scrolling by looking the
               // value in register VM_VARIABLE_SCROLL_Y
               // e.g. video->copyPage(srcPageId, dstPageId, vmVariables[VM_VARIABLE_SCROLL_Y]);
@@ -1030,8 +894,6 @@ namespace another_world {
               // vshw   #12
               // copy specified backbuffer to screen
               uint8_t id = fetch_byte(pc);
-
-              debug("Show buffer %d", id);
 
               registers[0xF7] = 0; // TODO:  why?
               
@@ -1046,7 +908,9 @@ namespace another_world {
               
               update_screen(visible_vram);
 
-              debug_yield();
+              if (debug_display_update) {
+                debug_display_update();
+              }
 
               break;
             }
@@ -1069,7 +933,7 @@ namespace another_world {
 
               if (string_id < string_table.size()) {
                 const std::string& string_entry = string_table.at(string_id);
-                debug(string_entry.c_str());
+                
               }
               else {
                 // TODO: why would we ever get an invalid string id?
@@ -1204,12 +1068,10 @@ namespace another_world {
       }
 
       if (new_paused_threads[i] == THREAD_LOCK) {
-        debug_log("Lock thread %d", i);
         paused_thread[i] = true;
       }
 
       if (new_paused_threads[i] == THREAD_UNLOCK) {
-        debug_log("Unlock thread %d", i);
         paused_thread[i] = false;
       }
     }

@@ -30,6 +30,7 @@ uint8_t palette[16][3];
 uint8_t pixelSize;
 std::chrono::steady_clock::time_point start;
 uint8_t keys;
+HANDLE log_file_handle;
 
 uint32_t now() {
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
@@ -117,33 +118,27 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       return result && bytes_read == length;
     };
 
-    another_world::debug_log = [](const char *fmt, ...) {
-      static bool first = true; // if first run then open the file and truncate
-      return;
-      va_list args;
-      std::wstring filename = L"vm.log";
-      va_start(args, fmt);
-      std::string line = string_format(fmt, args) + "\n";
-      va_end(args);
-      DWORD creation_mode = first ? CREATE_ALWAYS : OPEN_EXISTING;
-      HANDLE fh = CreateFile(filename.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, creation_mode, FILE_ATTRIBUTE_NORMAL, NULL);
-      SetFilePointer(fh, 0, NULL, FILE_END);
-      
-      WriteFile(fh, line.c_str(), line.length(), NULL, NULL);
 
-      CloseHandle(fh);
-
-      first = false;
-    };
+    std::wstring filename = L"vm.log";
+    log_file_handle = CreateFile(filename.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_FLAG_WRITE_THROUGH, NULL);
 
     another_world::debug = [](const char *fmt, ...) {
-      va_list args;
+      uint32_t last_debug_flush_ms = 0;
+
+      va_list args;     
       va_start(args, fmt);
       std::string line = string_format(fmt, args) + "\n";
       va_end(args);
-
-      std::wstring w(line.begin(), line.end());
-      OutputDebugStringW(w.c_str());
+      
+      WriteFile(log_file_handle, line.c_str(), line.length(), NULL, NULL);
+      
+      /*
+      // flush the debugging log file every 100ms
+      uint32_t debug_ms = now();
+      if (debug_ms - last_debug_flush_ms > 100) {
+        //FlushFileBuffers(log_file_handle);
+        last_debug_flush_ms = debug_ms;
+      }        */   
     };
 
     another_world::update_screen = [](uint8_t *buffer) {
@@ -163,18 +158,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         palette[i][2] = (b << 4) | b; 
       }
     };
-
-    another_world::debug_yield = []() {
+    /*
+    another_world::debug_display_update = []() {
       InvalidateRect(hWnd, NULL, FALSE);
       UpdateWindow(hWnd);
 
-    };
+    };*/
 
-    load_resource_list();
+
+
     vm.init();
 
     // initialise the first chapter
-    vm.initialise_chapter(16005);
+    vm.initialise_chapter(16003);
     
     start = std::chrono::steady_clock::now();
 
@@ -206,34 +202,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         debug("Key state %d", keys);
         
-        vm.registers[0xE5] = 0;
-        vm.registers[0xFB] = 0;
-        vm.registers[0xFC] = 0;
-
-
-        if (keys & 0b00001000) {
-          vm.registers[0xE5] = -1;
-          vm.registers[0xFB] = -1;
-        }
-
-        if (keys & 0b00000100) {
-          vm.registers[0xE5] = 1;
-          vm.registers[0xFB] = 1;
-        }
-
-        if (keys & 0b00000010) {
-          vm.registers[0xFC] = -1;
-        }
-
-        if (keys & 0b00000001) {
-          vm.registers[0xFC] = 1;
-        }
-
-
-        vm.registers[0xFD] = keys;
-        vm.registers[0xFA] = keys & 0b10000000 ? 1 : 0;
-        vm.registers[0xFE] = keys;
-
         
         vm.execute_threads();
         //debug("Frame took %dms", now() - frame_start);
@@ -242,6 +210,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       }      
     }
 
+    CloseHandle(log_file_handle);
 
     return (int) msg.wParam;
 }
@@ -373,51 +342,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_KEYDOWN:
     {
       switch (wParam) {
-        case VK_UP: {
-          keys |= 0b00001000;
-          break;
-        }
-        case VK_DOWN: {
-          keys |= 0b00000100;
-          break;
-        }
-        case VK_LEFT: {
-          keys |= 0b00000010;
-          break;
-        }
-        case VK_RIGHT: {
-          keys |= 0b00000001;
-          break;
-        }
-        case VK_SPACE: {
-          keys |= 0b10000000;
-          break;
-        }
+        case VK_UP:     { input.up      = true; break; }
+        case VK_DOWN:   { input.down    = true; break; }
+        case VK_LEFT:   { input.left    = true; break; }
+        case VK_RIGHT:  { input.right   = true; break; }
+        case VK_SPACE:  { input.action  = true; break; }
       }
     }break;
     case WM_KEYUP:
     {
       switch (wParam) {
-        case VK_UP: {
-          keys &= ~0b00001000;
-          break;
-        }
-        case VK_DOWN: {
-          keys &= ~0b00000100;
-          break;
-        }
-        case VK_LEFT: {
-          keys &= ~0b00000010;
-          break;
-        }
-        case VK_RIGHT: {
-          keys &= ~0b00000001;
-          break;
-        }
-        case VK_SPACE: {
-          keys &= ~0b10000000;
-          break;
-        }
+        case VK_UP:     { input.up      = false; break; }
+        case VK_DOWN:   { input.down    = false; break; }
+        case VK_LEFT:   { input.left    = false; break; }
+        case VK_RIGHT:  { input.right   = false; break; }
+        case VK_SPACE:  { input.action  = false; break; }
       }
     }break;
     case WM_PAINT:
@@ -448,7 +387,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             vram_to_bmp(pbmpRender, screen); // background
             StretchDIBits(drawDC, rcView.left, rcView.top, rcView.right - rcView.left, rcView.bottom - rcView.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
-            
+            /*
             vram_to_bmp(pbmpRender, vram0); // screen
             StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
@@ -466,7 +405,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             vram_to_bmp(pbmpRender, vram3); // screen
             StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
-            
+            */
           }
 
           BitBlt(hdc, rcClient.left, rcClient.top, rcClient.right - rcClient.left, rcClient.bottom - rcClient.top, drawDC, 0, 0, SRCCOPY);

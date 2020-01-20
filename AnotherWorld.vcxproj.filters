@@ -44,6 +44,9 @@
     <ClCompile Include="another-world\virtual-machine.cpp">
       <Filter>another-world</Filter>
     </ClCompile>
+    <ClCompile Include="another-world\resource.cpp">
+      <Filter>another-world</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="AnotherWorld.rc">

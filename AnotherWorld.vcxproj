@@ -156,6 +156,7 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="another-world\resource.cpp" />
     <ClCompile Include="another-world\virtual-machine.cpp" />
     <ClCompile Include="AnotherWorld.cpp" />
   </ItemGroup>
