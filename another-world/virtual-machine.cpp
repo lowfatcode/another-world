@@ -282,6 +282,9 @@ namespace another_world {
     bounds.x = pos.x - bounds.w / 2;
     bounds.y = pos.y - bounds.h / 2;     
 
+    // TODO: why is this needed? Without it some scenes show a glitchy top row of pixels
+    bounds.y--; 
+    
     // TODO: could do a quick bounds check here to test if on screen at all
 
     // load in the point data for this polygon and offset/scale accordingly
@@ -292,13 +295,7 @@ namespace another_world {
       points[i].y = bounds.y + fetch_byte(buffer, offset) * zoom / 64;
     }
 
-    // check if we have just a point to draw
-    if (bounds.w == 0 && bounds.h == 0) {
-      color = 0x0f;
-      point(working_vram, color, &pos);
-    } else {
-      polygon(working_vram, color, points, point_count);
-    }    
+    polygon(working_vram, color, points, point_count);
   }
 
   void VirtualMachine::draw_shape_group(uint8_t color, Point pos, int16_t zoom, uint8_t* buffer, uint32_t *offset) {
@@ -742,7 +739,7 @@ namespace another_world {
 
                 // the first 32 palettes are for the Amiga/VGA version, the
                 // following 32 palettes are for the MSDOS version              
-                // offset += (32 * 32); // offset to EGA/TGA
+                //offset += (32 * 32); // offset to EGA/TGA
                 set_palette((uint16_t*)&palette->data[offset]);
               }
 
