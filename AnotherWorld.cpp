@@ -30,7 +30,7 @@ uint8_t palette[16][3];
 uint8_t pixelSize;
 std::chrono::steady_clock::time_point start;
 uint8_t keys;
-HANDLE log_file_handle;
+
 
 uint32_t now() {
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
@@ -119,9 +119,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     };
 
 
-    std::wstring filename = L"vm.log";
-    log_file_handle = CreateFile(filename.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_FLAG_WRITE_THROUGH, NULL);
-
+    
+    
+    /*
     another_world::debug = [](const char *fmt, ...) {
       uint32_t last_debug_flush_ms = 0;
 
@@ -129,17 +129,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       va_start(args, fmt);
       std::string line = string_format(fmt, args) + "\n";
       va_end(args);
-      
+    
+      std::wstring filename = L"vm.log";
+      HANDLE log_file_handle = CreateFile(filename.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
       WriteFile(log_file_handle, line.c_str(), line.length(), NULL, NULL);
-      
-      /*
-      // flush the debugging log file every 100ms
-      uint32_t debug_ms = now();
-      if (debug_ms - last_debug_flush_ms > 100) {
-        //FlushFileBuffers(log_file_handle);
-        last_debug_flush_ms = debug_ms;
-      }        */   
-    };
+      CloseHandle(log_file_handle);
+ 
+    };*/
 
     another_world::update_screen = [](uint8_t *buffer) {
       memcpy(screen, buffer, 320 * 200 / 2);
@@ -170,7 +166,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     vm.init();
 
     // initialise the first chapter
-    vm.initialise_chapter(16001);
+    vm.initialise_chapter(16002);
     
     start = std::chrono::steady_clock::now();
 
@@ -197,10 +193,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
      // pause_ms = 0;
       if(clock - last_frame_clock > pause_ms) {
         uint32_t frame_start = now();
-        debug("-------------------------------");
-
-
-        debug("Key state %d", keys);
         
         
         vm.execute_threads();
@@ -209,8 +201,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         InvalidateRect(hWnd, NULL, FALSE);
       }      
     }
-
-    CloseHandle(log_file_handle);
 
     return (int) msg.wParam;
 }
