@@ -61,23 +61,20 @@ namespace another_world {
 
     // TODO: some special register values that need setting,
     // perhaps one day we'll have a dig around and figure out why...
-    registers[0x54] = 0x81;
-    registers[0xBC] = 0x10;
-    registers[0xC6] = 0x80;
-    registers[0xF2] = 4000;
+    //registers[0x54] = 0x81;
+    //registers[0xBC] = 0x10;
+    //registers[0xC6] = 0x80;
+
+    registers[0xF2] = 4000; // needs to be 6000 for Amiga data files
     registers[0xDC] = 33;
     registers[0xE4] = 20;
-
-    // number selected by committee, guaranteed random
-    registers[REG_RANDOM_SEED] = 2322; 
+    
+    // seed used to decide which copy protection symbols to show
+    registers[REG_RANDOM_SEED] = 2322; // selected by committee, guaranteed random
   }
 
   void VirtualMachine::initialise_chapter(uint16_t id) {
-    /* TODO: player->stop();
-	  mixer->stopAll();*/
-
-    // reset the heap and resource states
-    
+    // reset the heap and resource states   
     for(auto resource : resources) {
       resource->state = Resource::State::NOT_NEEDED;
     }
@@ -161,13 +158,13 @@ namespace another_world {
     }
 
     if (color == 0x10) {
-      // special blend mode, set the high bit of the colour (to offset the drawn color
+      // special blend mode, set the high bit of the colour to offset the drawn color
       // palette index by 8. This is used to overlay colours (like the headlights of
       // the car during the intro animation) and requires the palettes to be carefully
       // setup to achieve the effect.
       (*pd) |= 0x88 & mask;  // set the high bit in the masked nibble
     } else if (color > 0x10) {
-      // theory - this mode only draws the pixel if the equivalnet pixel in the background
+      // this mode only draws the pixel if the equivalent pixel in the background
       // has the high bit set, effectively allowing the masking of shapes
       (*pd) &= (~mask); // clear the nibble in the target
       uint8_t* ps = get_vram_from_id(0) + offset; // get same offset in copy from buffer

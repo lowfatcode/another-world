@@ -166,7 +166,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     vm.init();
 
     // initialise the first chapter
-    vm.initialise_chapter(16002);
+    vm.initialise_chapter(16001);
     
     start = std::chrono::steady_clock::now();
 
