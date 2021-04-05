@@ -188,7 +188,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
      
       uint32_t clock = now();
 
-      // aim for 25 frames per second
+      // aim for 50 frames per second
       uint16_t pause_ms = 20 * vm.registers[0xff];
      // pause_ms = 0;
       if(clock - last_frame_clock > pause_ms) {
@@ -377,7 +377,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             vram_to_bmp(pbmpRender, screen); // background
             StretchDIBits(drawDC, rcView.left, rcView.top, rcView.right - rcView.left, rcView.bottom - rcView.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
-            /*
+            
             vram_to_bmp(pbmpRender, vram0); // screen
             StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
 
@@ -395,7 +395,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             vram_to_bmp(pbmpRender, vram3); // screen
             StretchDIBits(drawDC, rcThumb.left, rcThumb.top, rcThumb.right - rcThumb.left, rcThumb.bottom - rcThumb.top, 0, 0, 320, 200, pbmpRender, &bmpInfo, DIB_RGB_COLORS, SRCCOPY);
-            */
+            
           }
 
           BitBlt(hdc, rcClient.left, rcClient.top, rcClient.right - rcClient.left, rcClient.bottom - rcClient.top, drawDC, 0, 0, SRCCOPY);

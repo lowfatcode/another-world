@@ -184,11 +184,6 @@ namespace another_world {
     Rect clip = { 0, 0, 320, 200 };
     int16_t miny = points[0].y, maxy = points[0].y;
 
-    // copy the colour value into the high and low nibbles making
-    // it easier to use later
-    uint8_t c = color & 0x0f;
-    c = c | (c << 4);
-
     for (uint16_t i = 1; i < point_count; i++) {
       miny = std::min(miny, points[i].y);
       maxy = std::max(maxy, points[i].y);
@@ -327,6 +322,33 @@ namespace another_world {
 
       uint32_t child_offset = (header & 0x7fff) * 2;
       draw_shape(child_color, polygon_pos, zoom, buffer, &child_offset);
+    }
+  }
+
+  void VirtualMachine::draw_text(uint8_t color, Point pos, std::string text) {
+    Point p = pos;
+
+    for (auto c : text) {
+      if (c == '\n') {
+        p.x = pos.x;
+        p.y += 8;
+      } else {
+        const uint8_t* character_data = _font + (c - ' ') * 8;
+
+        for (auto y = 0; y < 8; y++) {
+          for (auto x = 0; x < 8; x++) {
+            if ((*character_data) & (0x80 >> x)) {
+              Point po;
+              po.x = p.x + x;
+              po.y = p.y + y;
+              point(working_vram, color, &po);
+            }
+          }
+          character_data++;
+        }
+
+        p.x += 8;
+      }
     }
   }
 
@@ -911,7 +933,6 @@ namespace another_world {
               // is the woring framebuffer
               visible_vram = visible_vram == vram[1] ? vram[2] : vram[1];                
             }
-
               
             update_screen(visible_vram);
 
@@ -938,16 +959,14 @@ namespace another_world {
             uint8_t y = fetch_byte(pc);
             uint8_t colour = fetch_byte(pc);
 
-            if (string_id < string_table.size()) {
-              const std::string& string_entry = string_table.at(string_id);
-                
-            }
-            else {
-              // TODO: why would we ever get an invalid string id?
-              //assert(false);
-            }
+            Point pos;
+            pos.x = x * 8;
+            pos.y = y;
 
-            // TODO: make this work?
+            // find string in string table
+            const std::string &text = string_table.at(string_id);
+            draw_text(colour, pos, text);
+
             break;
           }
 

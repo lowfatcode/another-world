@@ -113,12 +113,17 @@ namespace another_world {
 		uint16_t fetch_word(uint8_t* b, uint32_t* c);
 
 		uint8_t* get_vram_from_id(uint8_t id);
+
+		// vm drawing routines
 		void draw_shape(uint8_t color, Point pos, int16_t zoom, uint8_t* buffer, uint32_t *offset);
 		void draw_shape_group(uint8_t color, Point pos, int16_t zoom, uint8_t* buffer, uint32_t* offset);
 		void draw_polygon(uint8_t color, Point pos, int16_t zoom, uint8_t* buffer, uint32_t *offset);
+		void draw_text(uint8_t color, Point pos, std::string text);
+
+		// primitive drawing routines
 		void polygon(uint8_t* target, uint8_t color, Point* points, uint8_t point_count);
 		void point(uint8_t* target, uint8_t color, Point* point);
-
+		
   };
 
 	const std::string opcode_names[29] = {
