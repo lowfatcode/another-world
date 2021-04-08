@@ -121,7 +121,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     
     
-    /*
+    
     another_world::debug = [](const char *fmt, ...) {
       uint32_t last_debug_flush_ms = 0;
 
@@ -131,11 +131,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       va_end(args);
     
       std::wstring filename = L"vm.log";
-      HANDLE log_file_handle = CreateFile(filename.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+      HANDLE log_file_handle = CreateFile(filename.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
       WriteFile(log_file_handle, line.c_str(), line.length(), NULL, NULL);
       CloseHandle(log_file_handle);
  
-    };*/
+    };
 
     another_world::update_screen = [](uint8_t *buffer) {
       memcpy(screen, buffer, 320 * 200 / 2);
@@ -297,25 +297,26 @@ void vram_to_bmp(LPBYTE pd, uint8_t* ps) {
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    switch (message)
-    {
+  switch (message)
+  {
     case WM_COMMAND:
-        {
-            int wmId = LOWORD(wParam);
-            // Parse the menu selections:
-            switch (wmId)
-            {
-            case IDM_ABOUT:
-                DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
-                break;
-            case IDM_EXIT:
-                DestroyWindow(hWnd);
-                break;
-            default:
-                return DefWindowProc(hWnd, message, wParam, lParam);
-            }
-        }
+    {
+      int wmId = LOWORD(wParam);
+      // Parse the menu selections:
+      switch (wmId)
+      {
+      case IDM_ABOUT:
+        DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
         break;
+      case IDM_EXIT:
+        DestroyWindow(hWnd);
+        break;
+      default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+      }
+    }
+    break;
+
     case WM_SIZE:
     {
       uint16_t height = HIWORD(lParam);
@@ -329,6 +330,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       SetRect(&rcView, 0, 0, rcSurface.right * pixelSize, rcSurface.bottom * pixelSize);
       OffsetRect(&rcView, (width - rcView.right) / 2, (height - rcView.bottom) / 2);
     }break;
+
     case WM_KEYDOWN:
     {
       switch (wParam) {
@@ -361,9 +363,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
           HDC drawDC = CreateCompatibleDC(hdc);
           HBITMAP bmpDraw = CreateCompatibleBitmap(hdc, rcClient.right - rcClient.left, rcClient.bottom - rcClient.top);
           HBITMAP hbmOld = (HBITMAP)SelectObject(drawDC, bmpDraw);
-
-          
-
+         
           HBRUSH backgroundBrush = CreateSolidBrush(RGB(30, 40, 50));
           FillRect(drawDC, &rcClient, backgroundBrush);
 

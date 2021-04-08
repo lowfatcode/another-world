@@ -5,8 +5,8 @@
   big endian
 */
 
-#include <assert.h>
-#include <string.h>
+#include <cassert>
+#include <cstring>
 #include <algorithm>
 #include <ctime>
 
@@ -37,7 +37,7 @@ namespace another_world {
   // file contents
   void init_resources() {
 
-    // TODO: move file access out of here by requiring a basic set 
+    // TODO: move file access out of here by requiring a basic set
     // of system calls to be provided
     uint8_t memlist[2940];
     uint8_t* p = memlist;
@@ -71,7 +71,7 @@ namespace another_world {
   }
 
   void load_chapter_resources(uint16_t id) {
-    
+
   }
 
   // loads all resources that are currently in the NEEDS_LOADING state
@@ -80,7 +80,7 @@ namespace another_world {
       if (resource->state == Resource::State::NEEDS_LOADING) {
 
         if (resource->type == Resource::Type::SOUND || resource->type == Resource::Type::MUSIC) {
-          // TODO: we're not currently supporting audio so no point in loading the 
+          // TODO: we're not currently supporting audio so no point in loading the
           // resources just yet...
           continue;
         }
@@ -150,7 +150,7 @@ namespace another_world {
   bool Resource::load(uint8_t* destination) {
     static std::string hex[16] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" };
 
-    // TODO: move file access out of here by requiring a basic set 
+    // TODO: move file access out of here by requiring a basic set
     // of system calls to be provided
     std::string bank_filename = "bank0" + hex[this->bank_id];
     read_file(bank_filename, this->bank_offset, this->packed_size, (char*)destination);
@@ -163,7 +163,7 @@ namespace another_world {
     }
 
     this->data = destination;
-    
+
     return success;
   }
 

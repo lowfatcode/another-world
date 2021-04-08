@@ -4,24 +4,24 @@
 #include <array>
 #include <map>
 #include <string>
-#include <stdint.h>
-#include <stdarg.h>
+#include <cstdint>
+#include <cstdarg>
 
 
 #include "byte-killer.hpp"
 
 namespace another_world {
 
-	constexpr uint32_t	HEAP_SIZE				= 200000;
+	constexpr uint32_t	HEAP_SIZE		= 200000;
 	constexpr uint16_t	REGISTER_COUNT	= 256;
-	constexpr uint16_t	THREAD_COUNT		= 64;
+	constexpr uint16_t	THREAD_COUNT	= 64;
 
-  extern uint16_t read_uint16_bigendian(const void* p);
-  extern uint32_t read_uint32_bigendian(const void* p);
+	extern uint16_t read_uint16_bigendian(const void* p);
+	extern uint32_t read_uint32_bigendian(const void* p);
 
-  extern bool (*read_file)(std::string filename, uint32_t offset, uint32_t length, char* buffer);
-  extern void (*debug)(const char *fmt, ...);
-  extern void (*update_screen)(uint8_t *buffer);
+	extern bool (*read_file)(std::string filename, uint32_t offset, uint32_t length, char* buffer);
+	extern void (*debug)(const char *fmt, ...);
+	extern void (*update_screen)(uint8_t *buffer);
 	extern void (*set_palette)(uint16_t* palette);
 	extern void (*debug_display_update)();
 
@@ -74,7 +74,7 @@ namespace another_world {
 
     bool load(uint8_t* destination);
   };
-  
+
 	struct Thread {
 		uint16_t pc;
 		bool paused;
@@ -89,7 +89,7 @@ namespace another_world {
 		uint32_t ticks = 0;
 
 		uint8_t   chapter_id;
-		
+
 		std::array<Thread, THREAD_COUNT> threads;
     int16_t   registers[REGISTER_COUNT];
     std::vector<uint16_t> call_stack;
@@ -123,7 +123,7 @@ namespace another_world {
 		// primitive drawing routines
 		void polygon(uint8_t* target, uint8_t color, Point* points, uint8_t point_count);
 		void point(uint8_t* target, uint8_t color, Point* point);
-		
+
   };
 
 	const std::string opcode_names[29] = {
@@ -149,8 +149,8 @@ namespace another_world {
 		"sub",    // 0x13   sub   d0, d1
 		"andi",   // 0x14   andi  d0, #1234
 		"ori",    // 0x15   ori   d0, #1234
-		"shli",   // 0x16   shli  d0, #1234 
-		"shri",   // 0x17   shri  d0, #1234 
+		"shli",   // 0x16   shli  d0, #1234
+		"shri",   // 0x17   shri  d0, #1234
 		"snd",    // 0x18   snd   #1234, #12, #12, #12
 		"load",   // 0x19   load  #1234
 		"music"   // 0x1a   music #1234, #1234, #12

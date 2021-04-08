@@ -1,12 +1,12 @@
-/* 
+/*
   resource definitions are stored in MEMLIST.BIN
 
   each record is twenty bytes long and numbers are stored as
   big endian
 */
 
-#include <assert.h>
-#include <string.h>
+#include <cassert>
+#include <cstring>
 #include <algorithm>
 #include <ctime>
 
@@ -28,7 +28,7 @@ namespace another_world {
     return (b[0] << 8) | b[1];
   }
 
-  uint32_t read_uint32_bigendian(const void* p) { 
+  uint32_t read_uint32_bigendian(const void* p) {
     const uint8_t* b = (const uint8_t*)p;
     return (b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
   }
@@ -39,7 +39,7 @@ namespace another_world {
   void (*update_screen)(uint8_t* buffer) = nullptr;
   void (*set_palette)(uint16_t* palette) = nullptr;
 
-  
+
   uint8_t vram0[320 * 200 / 2];
   uint8_t vram1[320 * 200 / 2];
   uint8_t vram2[320 * 200 / 2];
@@ -61,20 +61,20 @@ namespace another_world {
 
     // TODO: some special register values that need setting,
     // perhaps one day we'll have a dig around and figure out why...
-    //registers[0x54] = 0x81;
-    //registers[0xBC] = 0x10;
-    //registers[0xC6] = 0x80;
-
+    registers[0x54] = 0x81;
+    registers[0xBC] = 0x10;
+    registers[0xC6] = 0x80;
     registers[0xF2] = 4000; // needs to be 6000 for Amiga data files
+
     registers[0xDC] = 33;
     registers[0xE4] = 20;
-    
+
     // seed used to decide which copy protection symbols to show
     registers[REG_RANDOM_SEED] = 2322; // selected by committee, guaranteed random
   }
 
   void VirtualMachine::initialise_chapter(uint16_t id) {
-    // reset the heap and resource states   
+    // reset the heap and resource states
     for(auto resource : resources) {
       resource->state = Resource::State::NOT_NEEDED;
     }
@@ -91,14 +91,14 @@ namespace another_world {
     // 16007 = Final
     // 16008 = ???
     // 16009 = ???
-    
+
     chapter_id = id - 16000;
 
     registers[0xE4] = 0x14; // TODO: erm?
-  
+
     palette = resources[chapter_resources[chapter_id].palette];
     code = resources[chapter_resources[chapter_id].code];
-    background = resources[chapter_resources[chapter_id].background];  
+    background = resources[chapter_resources[chapter_id].background];
 
     // load the chapter resources
     palette->state = Resource::State::NEEDS_LOADING;
@@ -179,7 +179,7 @@ namespace another_world {
   }
 
   void VirtualMachine::polygon(uint8_t *target, uint8_t color, Point *points, uint8_t point_count) {
-    static int32_t nodes[256]; // maximum allowed number of nodes per scanline for polygon rendering    
+    static int32_t nodes[256]; // maximum allowed number of nodes per scanline for polygon rendering
 
     Rect clip = { 0, 0, 320, 200 };
     int16_t miny = points[0].y, maxy = points[0].y;
@@ -223,12 +223,12 @@ namespace another_world {
         for (p.x = nodes[i]; p.x <= nodes[i + 1]; p.x++) {
           point(target, color, &p);
         }
-      }      
+      }
     }
 
     if (debug_display_update) {
       debug_display_update();
-    }    
+    }
   }
 
   void VirtualMachine::draw_shape(uint8_t color, Point pos, int16_t zoom, uint8_t *buffer, uint32_t *offset) {
@@ -249,15 +249,15 @@ namespace another_world {
     if ((shape_header & 0b11000000) == 0b11000000) {
       // draw a single polygon
       // bits 0-5 of the header contain the colour of the polygon being drawn
-      // TODO: if the colour is set here why are we passing it in as a parameter?      
+      // TODO: if the colour is set here why are we passing it in as a parameter?
       if(color & 0x80) {
-        color = shape_header & 0x3f;      
+        color = shape_header & 0x3f;
       }
       draw_polygon(color, pos, zoom, buffer, offset);
     }
     else {
       // draw a polygon group
-      // bits 0-5 of the header seem to always contain the number 2. 
+      // bits 0-5 of the header seem to always contain the number 2.
       // why? we just don't know
       if ((shape_header & 0x3f) == 2) {
         draw_shape_group(color, pos, zoom, buffer, offset);
@@ -269,17 +269,17 @@ namespace another_world {
 
   void VirtualMachine::draw_polygon(uint8_t color, Point pos, int16_t zoom, uint8_t *buffer, uint32_t *offset) {
     static Point points[256];
-    
+
     // polygons are drawn offset by the centre of their bounding box
     Rect bounds;
     bounds.w = fetch_byte(buffer, offset) * zoom / 64;
-    bounds.h = fetch_byte(buffer, offset) * zoom / 64;    
+    bounds.h = fetch_byte(buffer, offset) * zoom / 64;
     bounds.x = pos.x - bounds.w / 2;
-    bounds.y = pos.y - bounds.h / 2;     
+    bounds.y = pos.y - bounds.h / 2;
 
     // TODO: why is this needed? Without it some scenes show a glitchy top row of pixels
-    bounds.y--; 
-    
+    bounds.y--;
+
     // TODO: could do a quick bounds check here to test if on screen at all
 
     // load in the point data for this polygon and offset/scale accordingly
@@ -301,7 +301,7 @@ namespace another_world {
 
     // TODO: this seems wrong, but produces much better output until it crashes - what gives?
     // surely it should be "i < count"?
-    for (uint8_t i = 0; i <= count; i++) {  
+    for (uint8_t i = 0; i <= count; i++) {
       uint16_t header = fetch_word(buffer, offset);
 
       // absolute position of shape (added to relative positions later)
@@ -353,12 +353,12 @@ namespace another_world {
   }
 
   uint8_t* VirtualMachine::get_vram_from_id(uint8_t id) {
-    // screen id 0 is unclear from Eric Chahi's notes he says 
+    // screen id 0 is unclear from Eric Chahi's notes he says
     // "set pour la couleur masque" which translates to "set for
     // the colour mask"? not sure what that means...
     //
     //   0 - vram[2] background framebuffer (used for mask color - "sert pour la coleur masque")
-    //   1 - vram[0] foreground framebuffer 1 
+    //   1 - vram[0] foreground framebuffer 1
     //   2 - vram[1] foreground framebuffer 2
     //   3 - vram[2] background framebuffer
     //
@@ -380,7 +380,7 @@ namespace another_world {
     if (id == 254) {
       // visible screen "ecran visible"
       return visible_vram;
-      
+
     }
 
     if (id == 255) {
@@ -427,7 +427,7 @@ namespace another_world {
       input_mask |= 0b10000000;
       registers[0xFA] = 1;
     }
- 
+
     // TODO: why both?
     registers[0xFD] = input_mask;
     registers[0xFE] = input_mask;
@@ -437,9 +437,9 @@ namespace another_world {
     if (debug) {
       debug("--- execute threads ---");
     }
-    
+
     // TODO: switch part if needed (can't this be done in the op code processing?)
-  
+
         //  //Check if a part switch has been requested.
         // 	if (res->requestedNextPart != 0) {
         // 		initForPart(res->requestedNextPart);
@@ -468,11 +468,13 @@ namespace another_world {
     for (uint8_t i = 0; i < THREAD_COUNT; i++) {
       new_paused_threads[i] = NO_UPDATE;
     }*/
-    
+
     std::map<uint8_t, Thread> requested_thread_state;
-    
+
     // step through each thread and execute the active ones
-    for(auto &thread : threads) {
+    for (int thread_id = 0; thread_id < threads.size(); thread_id++) {
+      auto& thread = threads[thread_id];
+
       if (thread.pc == THREAD_INACTIVE || thread.paused) {
         continue;
       }
@@ -480,7 +482,7 @@ namespace another_world {
       uint16_t* pc = &thread.pc;
 
       bool next_thread = false;
-      while(!next_thread) {          
+      while(!next_thread) {
         uint8_t opcode = fetch_byte(pc);
 
         std::string opcode_name = "----";
@@ -493,10 +495,10 @@ namespace another_world {
         } else {
           opcode_name = "plys";
         }
-          
+
         if(debug) {
-          debug("%6i)  %2i [%05u] > %02x:%-6s", ticks, 0, *(pc)-1, opcode, opcode_name.c_str());
-        }          
+          debug("%6i)  %2i [%05u] > %02x:%-6s", ticks, thread_id, *(pc)-1, opcode, opcode_name.c_str());
+        }
 
         // opcodes come in three different flavours depending on the status
         // of the two highest bits
@@ -510,7 +512,7 @@ namespace another_world {
         }
 
         if (opcode & 0x80) {
-          // contains offset for polygon data in cinematic data resource  
+          // contains offset for polygon data in cinematic data resource
           // the high bits of the address are 0-6 from the opcode
           uint32_t offset = (((opcode & 0x7f) << 8) | fetch_byte(pc)) * 2;
 
@@ -523,31 +525,31 @@ namespace another_world {
 
           // slightly weird one this. if the y value is greater than 199
           // then the extra is added onto the x value. i assume this is because
-          // the screen resolution is 320 pixels but a byte can only hold 
-          // numbers up to 255. this "hack" allows bigger numbers (up to 311) to 
+          // the screen resolution is 320 pixels but a byte can only hold
+          // numbers up to 255. this "hack" allows bigger numbers (up to 311) to
           // be represented in the x byte (at the cost that it can only happen
-          // when y is greater than 199 (so is effectively clamped to the 
+          // when y is greater than 199 (so is effectively clamped to the
           // bottom of the screen).
           if (pos.y > 199) {
             pos.x += pos.y - 199;
             pos.y = 199;
-          }                              
+          }
 
           draw_shape(0xff, pos, 64, polygon_data, &offset);
 
           ticks++;
           continue;
         }
-          
-        if(opcode & 0x40) {   
-          // contains offset for polygon data in cinematic data resource    
+
+        if(opcode & 0x40) {
+          // contains offset for polygon data in cinematic data resource
           // the offset is contained in the next two bytes in the bytecode
           uint32_t offset = fetch_word(pc) * 2;
-            
+
           uint8_t* polygon_data = background->data;
 
           Point pos;
-            
+
           // bits 0-5 of the opcode have special meaning that manipulate the
           // x and y coordinates for this polygon.
           //
@@ -658,7 +660,7 @@ namespace another_world {
             break;
           }
 
-          case 0x04: {              
+          case 0x04: {
             // call   #1234
             // push current program counter onto stack then jump to specified address
             int16_t w = fetch_word(pc);
@@ -677,7 +679,7 @@ namespace another_world {
 
           case 0x06: {
             // brk
-            // stop execution of this thread and switch execution to the next thread              
+            // stop execution of this thread and switch execution to the next thread
             next_thread = true;
             break;
           }
@@ -700,7 +702,7 @@ namespace another_world {
             Thread new_thread_state = threads[thread_id];
             new_thread_state.pc = new_pc;
             requested_thread_state[thread_id] = new_thread_state;
-  
+
             break;
           }
 
@@ -721,24 +723,24 @@ namespace another_world {
           case 0x0a: {
             // cjmp   #12, d0, d1 or #1234, #1234
             // conditional jump for expression when d0 compared to either
-            // d1 or an immediate byte or word value if expression result 
+            // d1 or an immediate byte or word value if expression result
             // is true then jump to specified address
-            uint8_t t = fetch_byte(pc);          
+            uint8_t t = fetch_byte(pc);
             int16_t a = registers[fetch_byte(pc)];
             int16_t b = fetch_byte(pc);
 
             if(t & 0x80) {
               // register to register comparison
-              b = registers[b];         
+              b = registers[b];
             } else if (t & 0x40) {
               // register to 16-bit literal comparison
-              b = (b << 8) | fetch_byte(pc);   
+              b = (b << 8) | fetch_byte(pc);
             }
 
             int16_t w = fetch_word(pc);
 
             bool result = false;
-            
+
             // mask out just the expression bits
             t &= 0b111;
             if(t == 0) { result = a == b; }
@@ -750,7 +752,7 @@ namespace another_world {
 
             if(result) {
               *pc = w;
-            }           
+            }
             break;
           }
 
@@ -758,9 +760,9 @@ namespace another_world {
             // pal    #12, #12
             // specify the index of the palette to use
             uint8_t id = fetch_byte(pc);
-    
+
             // TODO: from Eric Chahi's original notes the second byte of
-            // this instruction appears to be a speed ("a la vitesse") 
+            // this instruction appears to be a speed ("a la vitesse")
             // for the palette change - but then parts of the notes are
             // crossed out suggesting it was never implemented?
             uint8_t speed = fetch_byte(pc);
@@ -770,19 +772,19 @@ namespace another_world {
               uint16_t offset = id * 32;
 
               // the first 32 palettes are for the Amiga/VGA version, the
-              // following 32 palettes are for the MSDOS version              
+              // following 32 palettes are for the MSDOS version
               //offset += (32 * 32); // offset to EGA/TGA
               set_palette((uint16_t*)&palette->data[offset]);
             }
-                            
+
             break;
           }
 
-          case 0x0c: {              
+          case 0x0c: {
             // ???    #12, #12, #12
-            // this one is a bit cryptic with Eric Chahi's notes 
-            // referring  to the first "1st affecte"/"start" and last 
-            // "dernier affecte"/"end" vectors affected along with a 
+            // this one is a bit cryptic with Eric Chahi's notes
+            // referring  to the first "1st affecte"/"start" and last
+            // "dernier affecte"/"end" vectors affected along with a
             // "type" of action (unlock, lock, clear)
             // it suggests that this opcode should affect a range of
             // threads, perhaps updating their state in bulk?
@@ -797,10 +799,10 @@ namespace another_world {
               if (type == 0) {
                 // unlock
                 new_thread_state.paused = false;
-                requested_thread_state[thread_id] = new_thread_state;                  
+                requested_thread_state[thread_id] = new_thread_state;
               }
               if (type == 1) {
-                // lock 
+                // lock
                 new_thread_state.paused = true;
                 requested_thread_state[thread_id] = new_thread_state;
               }
@@ -814,7 +816,7 @@ namespace another_world {
           }
 
           // framebuffer manipulation op codes
-          // 
+          //
           case 0x0d: {
             // setws    #12
             // set the working screen for drawing operations
@@ -836,9 +838,9 @@ namespace another_world {
           case 0x0e: {
             // vclr   #12, #12
             // clears an entire backbuffer with the specified palette
-            // colour              
+            // colour
             uint8_t id = fetch_byte(pc);
-            uint8_t* d = get_vram_from_id(id);              
+            uint8_t* d = get_vram_from_id(id);
 
             uint8_t color = fetch_byte(pc);
             color |= color << 4;
@@ -891,7 +893,7 @@ namespace another_world {
             uint8_t* s = get_vram_from_id(src_id);
             uint8_t* d = get_vram_from_id(dest_id);
 
-           
+
             // TODO: why would we ever be given an invalid screen id?
             // that doesn't seem right...
             if (s && d) {
@@ -907,8 +909,8 @@ namespace another_world {
 
               memcpy(d, s, 320 * h / 2);
             }*/
-              
-              
+
+
             if (debug_display_update) {
               debug_display_update();
             }
@@ -925,15 +927,15 @@ namespace another_world {
             uint8_t id = fetch_byte(pc);
 
             registers[0xF7] = 0; // TODO:  why?
-              
-            if(id == 0xff) {                              
+
+            if(id == 0xff) {
               // from Eric Chahi's notes:
               // "si n == 255 on flip invisi et visi" so in case the
               // id specified is 255 we swap which of the backbuffers
               // is the woring framebuffer
-              visible_vram = visible_vram == vram[1] ? vram[2] : vram[1];                
+              visible_vram = visible_vram == vram[1] ? vram[2] : vram[1];
             }
-              
+
             update_screen(visible_vram);
 
             if (debug_display_update) {
@@ -945,7 +947,7 @@ namespace another_world {
 
           case 0x11: {
             // kill
-            // set current threads program counter to 0xffff (inactive) and 
+            // set current threads program counter to 0xffff (inactive) and
             // moveto the next thread
             *pc = THREAD_INACTIVE;
             next_thread = true;
@@ -970,12 +972,12 @@ namespace another_world {
             break;
           }
 
-          case 0x13: {          
+          case 0x13: {
             // sub  d0, d1
             // subtract value in register d1 from register d0
             uint8_t d = fetch_byte(pc);
             uint8_t s = fetch_byte(pc);
-            registers[d] -= registers[s];           
+            registers[d] -= registers[s];
             break;
           }
 
@@ -1013,9 +1015,9 @@ namespace another_world {
           case 0x17: {
             // shri  d0, #1234
             // shift value in register d0 right by value provided
-            // note: this shift is intentionally unsigned so new bits 
+            // note: this shift is intentionally unsigned so new bits
             // are zero filled
-              
+
             // TODO: seems odd the shift value is 16-bit since
             // shifting by anything more than 16 will zero out the
             // register
@@ -1058,7 +1060,7 @@ namespace another_world {
                 initialise_chapter(i);
               }
             }
-              
+
             break;
           }
 
@@ -1080,10 +1082,10 @@ namespace another_world {
 
     // set thread program counters and pause states if new values
     // have been requested
-    for (auto const& p : requested_thread_state) {      
+    for (auto const& p : requested_thread_state) {
       threads[p.first] = p.second;
     }
-    
+
     /*
     for (uint8_t i = 0; i < THREAD_COUNT; i++) {
       if (new_program_counter[i] == 0xfffe) {
