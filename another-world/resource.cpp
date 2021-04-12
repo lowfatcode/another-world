@@ -77,7 +77,7 @@ namespace another_world {
   // loads all resources that are currently in the NEEDS_LOADING state
   void load_needed_resources() {
     for (auto resource : resources) {
-      if (resource->state == Resource::State::NEEDS_LOADING) {
+      if (resource->state == Resource::State::NEEDS_LOADING/* || resource->type == Resource::Type::BANK*/) {
 
         if (resource->type == Resource::Type::SOUND || resource->type == Resource::Type::MUSIC) {
           // TODO: we're not currently supporting audio so no point in loading the
@@ -94,7 +94,8 @@ namespace another_world {
           resource_heap_offset += resource->size;
         }
 
-        //debug("Loading resource of type " + std::to_string(resource->type) + " at offset " + std::to_string(heap_offset));
+        //std::string debug_message = "Loading resource of type " + std::to_string(int(resource->type)) + " at offset " + std::to_string(resource_heap_offset);
+        //debug(debug_message.c_str());
         resource->load(destination);
 
         // TODO: if the resource was an image then it's encoded as 4 bitplanes a la mode 9
@@ -159,7 +160,12 @@ namespace another_world {
 
     if (this->packed_size != this->size) {
       ByteKiller bk;
+
+      uint32_t unpacked_size = bk.unpacked_size(destination, this->packed_size);
+
       success = bk.unpack(destination, this->packed_size);
+      
+      write_file(bank_filename + "." + std::to_string(this->bank_offset) + ".unpacked", unpacked_size, (char*)destination);
     }
 
     this->data = destination;

@@ -34,6 +34,7 @@ namespace another_world {
   }
 
   bool (*read_file)(std::string filename, uint32_t offset, uint32_t length, char* buffer) = nullptr;
+  bool (*write_file)(std::string filename, uint32_t length, char* buffer);
   void (*debug)(const char *fmt, ...) = nullptr;
   void (*debug_display_update)() = nullptr;
   void (*update_screen)(uint8_t* buffer) = nullptr;
@@ -1029,10 +1030,10 @@ namespace another_world {
 
           case 0x18: {
             // snd  #1234, #12, #12, #12
-            fetch_word(pc);
-            fetch_byte(pc);
-            fetch_byte(pc);
-            fetch_byte(pc);
+            uint16_t num = fetch_word(pc);
+            uint8_t frequency = fetch_byte(pc);
+            uint8_t volume = fetch_byte(pc);
+            uint8_t channel = fetch_byte(pc);
             break;
           }
 
@@ -1045,7 +1046,7 @@ namespace another_world {
             if (i == 0) {
               // TODO: Eric Chahi's notes are hard to read here but say
               // something like "libere la memoire annuler"
-              // sounds like perhaps this is "exit the game"?
+              // sounds like perhaps this is "free memory and exit the game"?
               // not sure - let's leave an assert here and see if it
               // ever happens...
               assert(false);
@@ -1054,8 +1055,7 @@ namespace another_world {
                 // load a resource
                 resources[i]->state = Resource::State::NEEDS_LOADING;
                 load_needed_resources();
-              }
-              else {
+              } else {
                 // switch to a new chapter
                 initialise_chapter(i);
               }
@@ -1066,9 +1066,9 @@ namespace another_world {
 
           case 0x1a: {
             // music #1234, #1234, #12
-            fetch_word(pc);
-            fetch_word(pc);
-            fetch_byte(pc);
+            uint16_t num = fetch_word(pc);
+            uint16_t period = fetch_word(pc);
+            uint16_t position = fetch_byte(pc);
             break;
           }
 

@@ -118,7 +118,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       return result && bytes_read == length;
     };
 
-
+    another_world::write_file = [](std::string filename, uint32_t length, char* buffer) {
+      filename = "c:\\another-world-data\\" + filename;
+      std::wstring wfilename(filename.begin(), filename.end());
+      HANDLE fh = CreateFile(wfilename.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+      SetFilePointer(fh, 0, NULL, FILE_BEGIN);
+      DWORD bytes_written = NULL;
+      BOOL result = WriteFile(fh, buffer, length, &bytes_written, NULL);
+      CloseHandle(fh);
+      return result && bytes_written == length;
+    };
     
     
     

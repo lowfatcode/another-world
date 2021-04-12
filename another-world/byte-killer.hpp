@@ -72,6 +72,11 @@ struct ByteKiller {
   public:
   ByteKiller() {}
 
+  uint32_t unpacked_size(uint8_t* buffer, uint32_t packed_size) {
+    ps = buffer + packed_size - 4;
+    return read_uint32_bigendian(ps);
+  }
+
   bool unpack(uint8_t *buffer, uint32_t packed_size) {
     // the data is unpacked from end to start using two pointers
     // the source pointer `ps` and destination pointer `pd`

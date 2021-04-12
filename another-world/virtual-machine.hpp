@@ -12,7 +12,7 @@
 
 namespace another_world {
 
-	constexpr uint32_t	HEAP_SIZE		= 200000;
+	constexpr uint32_t	HEAP_SIZE		= 600000;
 	constexpr uint16_t	REGISTER_COUNT	= 256;
 	constexpr uint16_t	THREAD_COUNT	= 64;
 
@@ -20,6 +20,7 @@ namespace another_world {
 	extern uint32_t read_uint32_bigendian(const void* p);
 
 	extern bool (*read_file)(std::string filename, uint32_t offset, uint32_t length, char* buffer);
+	extern bool (*write_file)(std::string filename, uint32_t length, char* buffer);
 	extern void (*debug)(const char *fmt, ...);
 	extern void (*update_screen)(uint8_t *buffer);
 	extern void (*set_palette)(uint16_t* palette);
